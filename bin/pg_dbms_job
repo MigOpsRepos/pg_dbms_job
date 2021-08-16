@@ -1,0 +1,760 @@
+#!/usr/bin/perl
+#-------------------------------------------------------------------------
+# pg_dbms_job.pl
+#
+#	Perl daemon to emulate Oracle DBMS_JOB for PostgreSQL.
+#
+# - this host and the remote one must have the same timestamp ???
+#
+# Author: Gilles Darold <gilles@darold.net>
+# Licence: PostgreSQL
+# Copyright (c) 2021, MigOps Inc,
+#-------------------------------------------------------------------------
+use vars qw($VERSION $PROGRAM);
+use strict;
+
+use IO::File;
+use Getopt::Long qw(:config bundling no_ignore_case_always);
+use POSIX qw(locale_h sys_wait_h _exit strftime);
+setlocale(LC_NUMERIC, '');
+setlocale(LC_ALL, 'C');
+use DBI;
+use DBD::Pg;
+
+$| = 1;
+
+$VERSION = '1.0';
+$PROGRAM = 'pg_dbms_job';
+
+$SIG{'CHLD'} = 'DEFAULT';
+
+# Global variables
+my $CONFIG_FILE  = "/etc/pg_dbms_job.conf";
+my %CONFIG = (
+	'naptime' => 1, # wait 1 second between runs
+	'debug' => 0,
+	'pidfile' => '/tmp/pg_dbms_job.pid',
+	'logfile' => '',
+	'async_limit' => 10
+);
+my $ABORT        = 0;
+my $KILL         = 0;
+my $RELOAD       = 0;
+my %RUNNING_PIDS = ();
+my %DBINFO       = ();
+my $HELP         = 0;
+my $SHOWVER      = 0;
+my %JOBS_CACHE   = ();
+my %ASYNC_JOBS   = ();
+my $SINGLE       = 0;
+
+my %PQSTATUS = (
+	0 => "Empty query string",
+	1 => "Query returning no data success",
+	2 => "Query returning data success",
+	3 => "COPY OUT transfer in progress",
+	4 => "COPY IN transfer is in progress",
+	5 => "Unexpected response received",
+	6 => "A nonfatal error occurred",
+	7 => "The query failed",
+	8 => "COPY IN/OUT transfer in progress",
+	9 => "Single tuple from larger resultset",
+	10 => "Pipeline synchronization point",
+	11 => "Command didn't run because of an abort earlier in a pipeline"
+);
+
+# Flag to terminate all actions and exit when SIGINT is received
+my $fini         = 0;
+# Flag to invalidate the job cache
+my $cache_invalidated = 0;
+# Main database connection handler
+my $dbh = undef;
+
+# Process command line options
+my $result = GetOptions
+(
+        "c|config=s"  => \$CONFIG_FILE,
+        "d|debug!"    => \$CONFIG{ 'debug' },
+        "h|help!"     => \$HELP,
+        "k|kill!"     => \$KILL,
+        "m|immediate!"=> \$ABORT,
+        "r|reload!"   => \$RELOAD,
+        "s|single!"   => \$SINGLE,
+        "v|version!"  => \$SHOWVER,
+);
+
+# Display usage if help is asked and exit
+usage() if $HELP;
+
+# Show version if asked end exit
+if ($SHOWVER)
+{
+	print "Version: $VERSION\n";
+	exit 0;
+}
+
+# Look at configuration file
+read_config();
+
+####
+# The daemon should be stopped, send signal to the process and exit
+####
+if ($KILL) {
+	signal_handling('TERM');
+} elsif ($ABORT) {
+	signal_handling('INT');
+} elsif ($RELOAD) {
+	signal_handling('HUP');
+}
+
+# Verify that an other process is not running
+if (-e $CONFIG{ 'pidfile' }) {
+	die "FATAL: pid file already exists at $CONFIG{ 'pidfile' }, does another pg_dbms_job process is running?\n";
+}
+
+####
+# Method used to fork a subprocess
+####
+sub spawn
+{
+        my $coderef = shift;
+
+        unless (@_ == 0 and $coderef and ref($coderef) eq 'CODE') {
+                print "usage: spawn CODEREF";
+                exit 0;
+        }
+
+	my $pid;
+        if (!defined($pid = fork)) {
+                dprint('ERROR', "cannot fork: $!\n");
+                return;
+        } elsif ($pid) {
+		$RUNNING_PIDS{$pid} = 1;
+                return; # the parent
+        }
+        # the child -- go spawn
+        $< = $>;
+        $( = $); # suid progs only
+
+        exit &$coderef();
+}
+
+####
+# Die cleanly on signal
+####
+sub terminate
+{
+	my $sig = shift;
+
+	$fini = 1;
+
+	dprint('LOG', "Received terminating signal $sig.");
+
+	$SIG{INT}  = \&terminate;
+	$SIG{TERM} = \&terminate;
+	$SIG{HUP}  = \&reload;
+
+	unlink("$CONFIG{ 'pidfile' }") if (-f $CONFIG{ 'pidfile' });
+
+	# Wait for all child processes to die
+	&wait_all_childs();
+
+	$dbh->disconnect() if (defined $dbh);
+
+	_exit(0);
+}
+
+####
+# Instruct the program to reread configuration
+# file and refresh all the jobs definitions.
+####
+sub reload
+{
+	my $sig = shift;
+
+	dprint('LOG', "Received reload signal $sig.");
+
+	$SIG{INT}  = \&terminate;
+	$SIG{TERM} = \&terminate;
+	$SIG{HUP}  = \&reload;
+
+	my $old_pidfile = $CONFIG{ 'pidfile' };
+	&read_config();
+
+	# In case the pid file path have change rename
+	# it or keep the old one in case of failure
+	if ($CONFIG{ 'pidfile' } and $CONFIG{ 'pidfile' } ne $old_pidfile)
+	{
+		unless (rename($old_pidfile, "$CONFIG{ 'pidfile' }"))
+		{
+			dprint('ERROR', "can't change path to pid keeping old one $old_pidfile, $!");
+			$CONFIG{ 'pidfile' } = $old_pidfile
+		}
+		else
+		{
+			dprint('LOG', "path to pid file has changed, rename $old_pidfile into $CONFIG{ 'pidfile' }");
+		}
+	}
+
+	# instruct main loop that it have to rebuild jobs cache
+	$cache_invalidated = 1;
+}
+
+# Die on kill -2, -3 or -15
+$SIG{'INT'} = $SIG{'TERM'} = \&terminate;
+$SIG{'HUP'} = \&reload;
+
+# Detach from terminal if we are not running in single mode
+if (!$SINGLE)
+{
+	my $pid = fork;
+	exit 0 if ($pid);
+	die "FATAL: Couldn't fork: $!" unless defined($pid);
+	POSIX::setsid() or die "Can't detach: \$!";
+	&dprint('LOG', "Detach from terminal with pid: $$");
+	open(STDIN , '<', "/dev/null");
+	open(STDOUT, '>', "/dev/null");
+	#open(STDERR, '>', "/dev/null");
+}
+
+# Set name of the program without path
+my $orig_name = $0;
+$0 = $PROGRAM;
+
+# Create pid file
+my $fhp = IO::File->new($CONFIG{ 'pidfile' }, 'w');
+if (not defined $fhp) {
+	die "FATAL: can't create pid file $CONFIG{ 'pidfile' }, $!\n";
+}
+print $fhp $$;
+close($fhp);
+
+####
+# Entering main loop
+####
+dprint('LOG', "Entering main loop.");
+my $previous_time = 0;
+while (1)
+{
+	# Stores loop start time
+	my $t0 = time;
+
+	# look if there some child process that die
+	foreach my $k (keys %RUNNING_PIDS)
+	{
+		my $kid = waitpid(-1, WNOHANG);
+		if ($kid > 0) {
+			delete $RUNNING_PIDS{$kid};
+		}
+	}
+
+	if ($cache_invalidated)
+	{
+		# We need to reconnect in the main loop
+		$dbh->disconnect() if (defined $dbh);
+		$dbh = undef;
+	}
+
+	# Connect to the database if this is not already the case
+	$dbh = connect_db() if (not defined $dbh);
+
+	# Get a list of asynchrous queued jobs to execute
+	%ASYNC_JOBS = get_async_jobs();
+
+	# Get jobs defined in the remote database if they are not
+	# already cached or that the cache have been invalidated.
+	%JOBS_CACHE = get_all_jobs() if ($cache_invalidated or scalar keys %JOBS_CACHE == 0);
+
+	# First process all the asynchronous jobs in a dedicated process each.
+	foreach my $j (sort { $a <=> $b } keys %ASYNC_JOBS)
+	{
+		spawn sub
+		{
+			&subprocess_asynchronous_jobs($j);
+		};
+	}
+
+	# We can not loop quicker than naptime, 1 second by default
+	if ( $previous_time and $t0 < ($previous_time+$CONFIG{ 'naptime' }) )
+	{
+		# Wait next run following the interval value
+		sleep(1);
+		# We received a signal while waiting
+		last if ($fini);
+		next;
+	}
+	$previous_time = $t0;
+
+	# We received a signal while working
+	last if ($fini or $SINGLE);
+}
+
+# Wait for last child stop
+&wait_all_childs();
+
+if (-f $CONFIG{ 'pidfile' }) {
+        unlink("$CONFIG{ 'pidfile' }") or dprint('ERROR', "Unable to remove pid file $CONFIG{ 'pidfile' }, $!");
+}
+
+dprint('LOG', "pg_dbms_job scheduler stopped.");
+
+exit 0;
+
+
+#------------------------------------------------------------------------------
+#                                   METHODS
+#------------------------------------------------------------------------------
+
+####
+# Show help
+####
+sub usage
+{
+	print qq{
+usage: $PROGRAM [options]
+
+options:
+
+  -c, --config  file  configuration file.
+  -d, --debug         run in debug mode.
+  -k, --kill          stop current running daemon gracefully waiting
+                      for all job completion.
+  -m, --immediate     stop running daemon and jobs immediatly.
+  -r, --reload        reload configuration file and jobs definition.
+  -s, --single        do not detach and run in single loop mode and exit.
+};
+
+	exit 0;
+}
+
+####
+# Same as local_die but with pid file cleanup
+####
+sub local_die
+{
+	unlink("$CONFIG{ 'pidfile' }") if (-f $CONFIG{ 'pidfile' });
+	die "$_[0]";
+}
+
+####
+# Send a signal to the pg_dbms_job daemon
+####
+sub signal_handling
+{
+	my $sig = shift;
+
+        my $proc = '';
+        if (-e "$CONFIG{ 'pidfile' }") {
+                $proc = `cat $CONFIG{ 'pidfile' }`;
+        } else {
+                $proc = `ps h -opid -C$PROGRAM | head -1`;
+        }
+        chomp($proc);
+        $proc =~ s/ //g;
+
+        if (!$proc) {
+                die "ERROR: can't find a pid to send SIG$sig, is $PROGRAM running?\n";
+        }
+
+        kill "-$sig", $proc;
+        if ($? == -1) {
+                print "FATAL: failed to execute: $!\n";
+        } elsif ($? & 127) {
+                printf "ERROR: child died with signal %d, %s coredump\n", ($? & 127),  ($? & 128) ? 'with' : 'without';
+        } else {
+                printf "OK: $PROGRAM exited with value %d\n", $? >> 8;
+        }
+        exit 0;
+}
+
+####
+# Read configuration file
+####
+sub read_config
+{
+	if (!-e $CONFIG_FILE) {
+		local_die("FATAL: can not find the configuration file $CONFIG_FILE\n");
+	}
+
+	my $curfh = IO::File->new($CONFIG_FILE, 'r');
+	if (defined $curfh)
+	{
+		my @content = <$curfh>;
+		$curfh->close();
+
+		# Set the logfile first to be able to log the configuratioin changes
+		foreach my $l ( @content )
+		{
+			chomp($l);
+			# cleanup the line
+			$l =~ s/\r//s;
+			$l =~ s/\#.*//;
+			$l =~ s/^\s+//;
+			$l =~ s/\s+$//;
+			next if (!$l);
+
+			my ($var, $val) = split(/\s*=\s*/, $l);
+			$var = lc($var);
+			if ($var eq 'logfile')
+			{
+				if ($CONFIG{ 'logfile' } ne $val)
+				{
+					$CONFIG{ 'logfile' } = $val;
+					dprint('LOG', "Setting logfile from configuration file to $CONFIG{ 'logfile' }");
+				}
+			}
+		}
+
+		foreach my $l ( @content )
+		{
+			chomp($l);
+			# cleanup the line
+			$l =~ s/\r//s;
+			$l =~ s/\#.*//;
+			$l =~ s/^\s+//;
+			$l =~ s/\s+$//;
+			next if (!$l);
+
+			my ($var, $val) = split(/\s*=\s*/, $l);
+			$var = lc($var);
+			if ($var eq 'pidfile')
+			{
+				if ($CONFIG{ 'pidfile' } ne $val)
+				{
+					$CONFIG{ 'pidfile' } = $val;
+					dprint('LOG', "Setting pidfile from configuration file to $CONFIG{ 'pidfile' }");
+				}
+			}
+			elsif ($var eq 'naptime')
+			{
+				$val = int($val);
+				if ($CONFIG{ 'naptime' } != $val)
+				{
+					$CONFIG{ 'naptime' } = $val;
+					dprint('LOG', "Setting naptime from configuration file to $CONFIG{ 'naptime' }");
+				}
+			}
+			elsif ($var eq 'debug')
+			{
+				$val = int($val);
+				if ($CONFIG{ 'debug' } ne $val)
+				{
+					$CONFIG{ 'debug' } = $val;
+					dprint('LOG', "Setting debug from configuration file to $CONFIG{ 'debug' }");
+				}
+			}
+			elsif ($var eq 'async_limit')
+			{
+				$val = int($val);
+				if ($CONFIG{ 'async_limit' } != $val)
+				{
+					$CONFIG{ 'async_limit' } = $val;
+					dprint('LOG', "Setting async_limit from configuration file to $CONFIG{ 'async_limit' }");
+				}
+			}
+			elsif ($var =~ /^(host|database|user|passwd|port)$/)
+			{
+				$val = int($val) if ($var eq 'port');
+				if (not exists $DBINFO{$var} or $DBINFO{$var} ne $val)
+				{
+					$DBINFO{$var} = $val;
+					dprint('LOG', "Setting $var from configuration file to $DBINFO{$var}");
+				}
+			}
+		}
+	}
+}
+
+####
+# Wait for all subprocesses die
+####
+sub wait_all_childs
+{
+	while (scalar keys %RUNNING_PIDS > 0)
+	{
+		my $kid = waitpid(-1, WNOHANG);
+		if ($kid > 0)
+		{
+			delete $RUNNING_PIDS{$kid};
+		}
+		sleep(1);
+	}
+}
+
+####
+# Log messages to file 
+####
+sub dprint
+{
+	my ($level, $msg) = @_;
+
+	my ($package, $filename, $line) = caller;
+
+	return if ($KILL or (uc($level) eq 'DEBUG' and !$CONFIG{ 'debug' }));
+
+	my $t = strftime('%Y-%m-%d %H:%M:%S', localtime);
+
+	if ($CONFIG{ 'logfile' } && open(my $out, '>>', "$CONFIG{ 'logfile' }"))
+	{
+		flock($out, 2) or return;
+		print $out "$t [$$]: [$line] $level:  $msg\n";
+		close($out);
+	} else {
+		print STDERR "ERROR: can't write to log file $CONFIG{ 'logfile' }, $!\n";
+		print STDERR "$t [$$]: [$line] $level:  $msg\n";
+	}
+}
+
+####
+# Connect to the database and return the global database connection handler
+####
+sub connect_db
+{
+	$0 = 'pg_dbms_job:main';
+	my $ldbh = DBI->connect("dbi:Pg:dbname=$DBINFO{database};host=$DBINFO{host};port=$DBINFO{port}",
+						$DBINFO{user},
+						$DBINFO{passwd},
+						{AutoInactiveDestroy => 1, AutoCommit => 1});
+	# Check for connection failure
+	if (not defined $ldbh)
+	{
+		dprint('FATAL', "can't connect to \"dbi:Pg:dbname=$DBINFO{database};host=$DBINFO{host};port=$DBINFO{port}\", $DBI::errstr");
+		local_die("FATAL: can't connect to \"dbi:Pg:dbname=$DBINFO{database};host=$DBINFO{host};port=$DBINFO{port}\", $DBI::errstr\n");
+	}
+
+	# Set application name to pg_dbms_job:main
+	if (not $ldbh->do("SET application_name TO 'pg_dbms_job:main'")) {
+		# We don't take much more attention of this error here
+		dprint('ERROR', "can not set application_name, reason: " . $ldbh->errstr);
+	}
+
+	# Now that we are connected veryfy that there is no other
+	# scheduler already runing on this database by looking for
+	# entries with the same application_name in pg_stat_activity
+	my $query = "SELECT count(*) FROM pg_catalog.pg_stat_activity WHERE datname='$DBINFO{database}' AND application_name='pg_dbms_job:main'";
+	my $sth = $ldbh->prepare($query);
+	if (!defined $sth)
+	{
+		dprint('ERROR', "can't prepare statement, $DBI::errstr");
+		local_die("ERROR: can't prepare statement, $DBI::errstr\n");
+	}
+
+	$sth->execute;
+	if ($sth->err)
+	{
+		dprint('ERROR', "can't execute statement, $DBI::errstr");
+		local_die("ERROR: can't execute statement, $DBI::errstr\n");
+	}
+	my @row = $sth->fetchrow;
+	if ($row[0] > 1)
+	{
+		dprint('FATAL', "another pg_dbms_job process is running on this database! Aborting.");
+		local_die("FATAL: another pg_dbms_job process is running on this database! Aborting.\n");
+	}
+
+	return $ldbh;
+}
+
+####
+# Get all jobs defined in the remote database.
+# In case of error the program is terminated.
+# FIXME: keep it alive and enter a wait mode to be able
+# to execute jobs once it is possible again ???
+####
+sub get_all_jobs
+{
+	if ($cache_invalidated)
+	{
+		dprint('LOG', 'initializing jobs cache');
+		$cache_invalidated = 0;
+	}
+
+	# Get all jobs from table ALL_JOBS
+	my $query = "SELECT * FROM dbms_job.all_jobs ORDER BY job";
+	my $sth = $dbh->prepare($query);
+	if (!defined $sth)
+	{
+		dprint('ERROR', "can't prepare statement, $DBI::errstr");
+		local_die("ERROR: can't prepare statement, $DBI::errstr\n");
+	}
+
+	$sth->execute;
+	if ($sth->err)
+	{
+		dprint('ERROR', "can't execute statement, $DBI::errstr");
+		local_die("ERROR: can't execute statement, $DBI::errstr\n");
+	}
+	my %alljobs = ();
+	while (my $row = $sth->fetchrow_hashref)
+	{
+		# Register the jobs information into a hash by job id
+		foreach my $k (keys %$row) {
+			$alljobs{$row->{job}}{$k} = $row->{$k}; 
+		}
+	}
+	$sth->finish();
+
+	return %alljobs;
+}
+
+####
+# Get asynchronous jobs to execute and delete them from the queue.
+####
+sub get_async_jobs
+{
+	my %asyncjobs = ();
+
+	# Get all jobs to be executed asap from table ALL_ASYNC_JOBS. It is limitted
+	# to async_limit at a time to avoid forking too much process in a loop.
+	my $query = qq{
+DELETE FROM dbms_job.all_async_jobs
+WHERE job IN (SELECT job FROM dbms_job.all_async_jobs ORDER BY job LIMIT $CONFIG{ 'async_limit' })
+RETURNING *
+};
+	my $sth = $dbh->prepare($query);
+	if (!defined $sth)
+	{
+		dprint('ERROR', "can't prepare statement, $DBI::errstr");
+		local_die("ERROR: can't prepare statement, $DBI::errstr\n");
+	}
+
+	$sth->execute;
+	if ($sth->err)
+	{
+		dprint('ERROR', "can't execute statement, $DBI::errstr");
+		local_die("ERROR: can't execute statement, $DBI::errstr\n");
+	}
+	while (my $row = $sth->fetchrow_hashref)
+	{
+		# Register the jobs information into a hash by job id
+		foreach my $k (keys %$row) {
+			$asyncjobs{$row->{job}}{$k} = $row->{$k}; 
+		}
+	}
+	$sth->finish();
+
+	return %asyncjobs;
+}
+
+####
+# Execute the job's plpgsql code on te remote database
+####
+sub subprocess_asynchronous_jobs
+{
+	my $jobid = shift;
+
+	my $start_t = strftime('%Y-%m-%d %H:%M:%S', localtime);
+
+	$0 = "pg_dbms_job:async:$jobid";
+
+	# Subprocess must completed their work in case
+	# of interruption unless we received SIGINT
+	$SIG{TERM} = 'IGNORE';
+	$SIG{HUP}  = 'IGNORE';
+
+	if ($CONFIG{ 'debug' })
+	{
+		dprint('LOG', "executing job $jobid");
+		foreach my $k (sort { $a <=> $b } keys %{ $ASYNC_JOBS{ $jobid } })
+		{
+			dprint('DEBUG', "job $jobid with parameter $k: $ASYNC_JOBS{ $jobid }{ $k }");
+		}
+	}
+
+	# Clone the connection to the database
+	my $ldbh = $dbh->clone();
+
+	if (defined $ldbh)
+	{
+		# Set application name to pg_dbms_job:jobid
+		if (not $ldbh->do("SET application_name TO 'pg_dbms_job:async:$jobid'")) {
+			# We don't take much more attention of this error here
+			dprint('ERROR', "can not set application_name, reason: " . $ldbh->errstr);
+		}
+
+		# Set role for the code execution
+		if ($ASYNC_JOBS{ $jobid }{ 'log_user' })
+		{
+			if (not $ldbh->do("SET ROLE $ASYNC_JOBS{ $jobid }{ 'log_user' }")) {
+				# We don't take much more attention of this error here
+				dprint('ERROR', "can not start a transaction, reason: " . $ldbh->errstr);
+			}
+		}
+
+		# start a transaction
+		if (not $ldbh->do("BEGIN")) {
+			# We don't take much more attention of this error here
+			dprint('ERROR', "can not start a transaction, reason: " . $ldbh->errstr);
+		}
+
+		# Set search_path for the code execution
+		if ($ASYNC_JOBS{ $jobid }{ 'schema_user' })
+		{
+			if (not $ldbh->do("SET LOCAL search_path TO $ASYNC_JOBS{ $jobid }{ 'schema_user' }")) {
+				# We don't take much more attention of this error here
+				dprint('ERROR', "can not start a transaction, reason: " . $ldbh->errstr);
+			}
+		}
+
+		my $success = 1;
+		my $t0 = time;
+		dprint('LOG', "executing code of job id $jobid: $ASYNC_JOBS{ $jobid }{ 'what' }");
+		# Execute the code of the WHAT column
+		if (not $ldbh->do($ASYNC_JOBS{ $jobid }{ 'what' }))
+		{
+			dprint('ERROR', "job $jobid failure, reason: " . $ldbh->errstr);
+			$success = 0;
+			# Rollback the transaction
+			if (not $ldbh->do("ROLLBACK")) {
+				# We don't take much more attention of this error here
+				dprint('ERROR', "can not rollback a transaction, reason: " . $ldbh->errstr);
+			}
+		}
+		else
+		{
+			# Commit the transaction
+			if (not $ldbh->do("COMMIT")) {
+				# We don't take much more attention of this error here
+				dprint('ERROR', "can not commit a transaction, reason: " . $ldbh->errstr);
+			}
+		}
+
+		my $t1 = time;
+		# Store the execution result in table all_job_run_details
+		my @ret = store_job_execution_details($jobid, $ldbh, $start_t, $t1 - $t0, $success);
+
+		$ldbh->disconnect() if (defined $ldbh);
+		if ($#ret >= 0) {
+			print STDERR "ERROR: can't execute statement: \"$ret[0]\", $ret[1]\n";
+		}
+	}
+	dprint('LOG', "end of subprocess executing job $jobid");
+	exit(0);
+}
+
+####
+# Store the history of the job execution
+####
+sub store_job_execution_details
+{
+	my ($jobid, $ldbh, $start_date, $duration, $success) = @_;
+
+	my $errstr = $ldbh->errstr;
+	$errstr =~ s/'/''/g;
+
+	my $status = ($success) ? 'SUCCESS' : 'FAILURE';
+	$status = $PQSTATUS{ $ldbh->err } if (exists $PQSTATUS{ $ldbh->err });
+
+	my $query = "INSERT INTO dbms_job.all_scheduler_job_run_details (owner, job_name, status, error, req_start_date, actual_start_date, run_duration, slave_pid, additional_info)";
+	$query .= " VALUES ('" . $ASYNC_JOBS{ $jobid }{ 'log_user' } . "', '$jobid', ";
+	$query .= "'" . $PQSTATUS{ $ldbh->err } . "', '" . $ldbh->state . "', NULL, '$start_date', $duration, ";
+	$query .= "$$, '$errstr')";
+
+	if (not $ldbh->do($query))
+	{
+		dprint('ERROR', "can't execute statement: \"$query\", $DBI::errstr");
+		return ($query, $DBI::errstr);;
+	}
+	return ();
+}
+
