@@ -46,6 +46,20 @@ The scheduler is a Perl program that runs in background it must be executed as P
 
 There must be one scheduler daemon running per database using the extension with a dedicated configuration file.
 
+```
+usage: pg_dbms_job [options]
+
+options:
+
+  -c, --config  file  configuration file. Default: /etc/pg_dbms_job/pg_dbms_job.conf
+  -d, --debug         run in debug mode.
+  -k, --kill          stop current running daemon gracefully waiting
+                      for all job completion.
+  -m, --immediate     stop running daemon and jobs immediatly.
+  -r, --reload        reload configuration file and jobs definition.
+  -s, --single        do not detach and run in single loop mode and exit.
+```
+
 ### Configuration
 
 The format of the configuration file is the same as postgresql.conf.
@@ -96,7 +110,7 @@ passwd=gilles
 
 ### Scheduled jobs
 
-Jobs to run are stored in table `dbms_job.all_jobs` which is the same structure as the one in Oracle. Some columns are just here for compatibility but are not used. They are executed when current timestamp of the scheduler daemon is upper or equal to the date defined in the `next_date` attribute. FIXME.
+Jobs to run are stored in table `dbms_job.all_jobs` which is the same structure as the one in Oracle. Some columns are just here for compatibility but are not used. They are executed when current timestamp of the scheduler daemon is upper or equal to the date defined in the `next_date` attribute.
 
 ```
 CREATE TABLE dbms_job.all_jobs
@@ -181,7 +195,7 @@ CREATE TABLE dbms_job.all_scheduler_job_run_details
 
 ## Procedures
 
-### BROKEN
+### BROKEN
 
 Disables job execution. This procedure sets the broken flag. Broken jobs are never run.
 
@@ -315,7 +329,7 @@ Example
 
 	EXECUTE DBMS_JOB.RUN(14144);
 
-### SUBMIT
+### SUBMIT
 
 Submits a new job to the job queue. It chooses the job from the sequence sys.jobseq.
 

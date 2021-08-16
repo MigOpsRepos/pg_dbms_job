@@ -29,7 +29,7 @@ $PROGRAM = 'pg_dbms_job';
 $SIG{'CHLD'} = 'DEFAULT';
 
 # Global variables
-my $CONFIG_FILE  = "/etc/pg_dbms_job.conf";
+my $CONFIG_FILE  = "/etc/pg_dbms_job/pg_dbms_job.conf";
 my %CONFIG = (
 	'naptime' => 1, # wait 1 second between runs
 	'debug' => 0,
@@ -315,7 +315,7 @@ usage: $PROGRAM [options]
 
 options:
 
-  -c, --config  file  configuration file.
+  -c, --config  file  configuration file. Default: $CONFIG_FILE
   -d, --debug         run in debug mode.
   -k, --kill          stop current running daemon gracefully waiting
                       for all job completion.
