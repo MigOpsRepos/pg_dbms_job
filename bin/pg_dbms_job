@@ -234,7 +234,8 @@ close($fhp);
 ####
 dprint('LOG', "Entering main loop.");
 my $previous_time = 0;
-while (1)
+# exit loop when SIGTERM is received or we are running in single mode
+while (!$fini)
 {
 	# Stores loop start time
 	my $t0 = time;
@@ -263,14 +264,14 @@ while (1)
 
 	# Get jobs defined in the remote database if they are not
 	# already cached or that the cache have been invalidated.
-	%JOBS_CACHE = get_all_jobs() if ($cache_invalidated or scalar keys %JOBS_CACHE == 0);
+	%JOBS_CACHE = get_scheduled_jobs() if ($cache_invalidated or scalar keys %JOBS_CACHE == 0);
 
-	# First process all the asynchronous jobs in a dedicated process each.
+	# Process all the asynchronous jobs in a dedicated process each.
 	foreach my $j (sort { $a <=> $b } keys %ASYNC_JOBS)
 	{
 		spawn sub
 		{
-			&subprocess_asynchronous_jobs($j);
+			&subprocess_asynchronous_jobs( $j );
 		};
 	}
 
@@ -279,14 +280,13 @@ while (1)
 	{
 		# Wait next run following the interval value
 		sleep(1);
-		# We received a signal while waiting
-		last if ($fini);
-		next;
 	}
-	$previous_time = $t0;
+	else
+	{
+		$previous_time = $t0;
+	}
 
-	# We received a signal while working
-	last if ($fini or $SINGLE);
+	last if ($SINGLE);
 }
 
 # Wait for last child stop
@@ -561,7 +561,7 @@ sub connect_db
 # FIXME: keep it alive and enter a wait mode to be able
 # to execute jobs once it is possible again ???
 ####
-sub get_all_jobs
+sub get_scheduled_jobs
 {
 	if ($cache_invalidated)
 	{
@@ -584,6 +584,7 @@ sub get_all_jobs
 		dprint('ERROR', "can't execute statement, $DBI::errstr");
 		local_die("ERROR: can't execute statement, $DBI::errstr\n");
 	}
+
 	my %alljobs = ();
 	while (my $row = $sth->fetchrow_hashref)
 	{
@@ -697,13 +698,19 @@ sub subprocess_asynchronous_jobs
 		}
 
 		my $success = 1;
+		my $errstr = '';
+		my $status = '';
+		my $sqlstate = '';
 		my $t0 = time;
 		dprint('LOG', "executing code of job id $jobid: $ASYNC_JOBS{ $jobid }{ 'what' }");
 		# Execute the code of the WHAT column
 		if (not $ldbh->do($ASYNC_JOBS{ $jobid }{ 'what' }))
 		{
-			dprint('ERROR', "job $jobid failure, reason: " . $ldbh->errstr);
 			$success = 0;
+			$errstr = $ldbh->errstr;
+			$status = $PQSTATUS{$ldbh->err} || '';
+			$sqlstate = $ldbh->state || '';
+			dprint('ERROR', "job $jobid failure, reason: $errstr");
 			# Rollback the transaction
 			if (not $ldbh->do("ROLLBACK")) {
 				# We don't take much more attention of this error here
@@ -721,7 +728,9 @@ sub subprocess_asynchronous_jobs
 
 		my $t1 = time;
 		# Store the execution result in table all_job_run_details
-		my @ret = store_job_execution_details($jobid, $ldbh, $start_t, $t1 - $t0, $success);
+		my @ret = store_job_execution_details(  $ldbh,
+							$jobid, $start_t, $t1 - $t0,
+							$status, $errstr, $success, $sqlstate);
 
 		$ldbh->disconnect() if (defined $ldbh);
 		if ($#ret >= 0) {
@@ -737,17 +746,13 @@ sub subprocess_asynchronous_jobs
 ####
 sub store_job_execution_details
 {
-	my ($jobid, $ldbh, $start_date, $duration, $success) = @_;
+	my ($ldbh, $jobid, $start_date, $duration, $errstr, $pqstatus, $success, $sqlstate) = @_;
 
-	my $errstr = $ldbh->errstr;
 	$errstr =~ s/'/''/g;
-
-	my $status = ($success) ? 'SUCCESS' : 'FAILURE';
-	$status = $PQSTATUS{ $ldbh->err } if (exists $PQSTATUS{ $ldbh->err });
 
 	my $query = "INSERT INTO dbms_job.all_scheduler_job_run_details (owner, job_name, status, error, req_start_date, actual_start_date, run_duration, slave_pid, additional_info)";
 	$query .= " VALUES ('" . $ASYNC_JOBS{ $jobid }{ 'log_user' } . "', '$jobid', ";
-	$query .= "'" . $PQSTATUS{ $ldbh->err } . "', '" . $ldbh->state . "', NULL, '$start_date', $duration, ";
+	$query .= "'$pqstatus', '$sqlstate', NULL, '$start_date', $duration, ";
 	$query .= "$$, '$errstr')";
 
 	if (not $ldbh->do($query))
