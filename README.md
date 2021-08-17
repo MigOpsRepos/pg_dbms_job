@@ -6,7 +6,9 @@ This PostgreSQL extension provided full compatibility with the DBMS_JOB Oracle m
 
 It allows the creation, scheduling, and managing of jobs. A job runs a SQL command, a stored procedure or any plpgsql code which has been previously stored in the database. The `submit` stored procedure is used to create and store the definition of a job. A job identifier is assigned to a job along with its associated code to execute and the attributes describing when and how often the job is to be run.
 
-If the `submit` stored procedure is called without the `next_date` (when) and `interval` (how often) attributes, the job is executed immediatly in an asynchronous process. If the 'when' and 'how often' attributes are set the job will be started when appropriate.
+If the `submit` stored procedure is called without the `next_date` (when) and `interval` (how often) attributes, the job is executed immediatly in an asynchronous process. If `interval` is NULL and that `next_date` is lower or equal to current timestamp the job is also executed immediatly in an asynchronous process. If the 'when' and 'how often' attributes are set the job will be started when appropriate.
+
+If a scheduled job completes successfully, then its new execution date is placed in `next_date`. The nuew date is calculated by executing the statement `SELECT interval INTO next_date`. The `interval` parameter must evaluate to a time in the future.
 
 This extension consist in a SQL script to create all the objects related to its operation and a daemon that must be run attached to the database where job are defined. The daemon is responsible to execute the queued asynchronous jobs and the scheduled ones. It should be running on the same host or both host should have the same time synchronization source.
 
@@ -95,7 +97,7 @@ naptime=1
 logfile=/tmp/pg_dbms_job.log
 # Asynchrounous job running at same time limit
 async_limit=10
-#--yy-----------
+#-------------
 #  Database
 #-------------
 # Information of the database to poll
