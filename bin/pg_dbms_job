@@ -75,6 +75,9 @@ my $cache_invalidated = 0;
 # Main database connection handler
 my $dbh = undef;
 
+# Flag for initial import of jobs
+my $startup = 1;
+
 # Process command line options
 my $result = GetOptions
 (
@@ -275,11 +278,20 @@ while (!$fini)
 			$async_count++ if ($topic eq 'dbms_job_async_notify');
 		}
 	}
+	else
+	{
+		# In case we can not connect to the database
+		# wait one second and try again.
+		sleep(1);
+		$startup = 1;
+		next;
+	}
 
 	# Get a list of asynchrous queued jobs to execute
-	if ($async_count) {
-		%ASYNC_JOBS = get_async_jobs($async_count, %ASYNC_JOBS);
+	if ($async_count || $startup) {
+		%ASYNC_JOBS = get_async_jobs($async_count, $startup);
 	}
+	$startup = 0;
 
 	# Get jobs defined in the remote database if they are not
 	# already cached or that the cache have been invalidated.
@@ -612,14 +624,20 @@ sub get_scheduled_jobs
 ####
 sub get_async_jobs
 {
-	my $jobcount = shift;
+	my ($jobcount, $readall) = @_;
+
 	my %asyncjobs = ();
+	my $limit = '';
+
+	# At startup we load all pending jobs to execute, in this case jobcount
+	# is equal to 0 otherwise limit the jobs returned in this loop.
+	$limit = "LIMIT $jobcount" if ($jobcount && !$readall);
 
 	# Get jobs to be executed asap from table ALL_ASYNC_JOBS limitted
 	# to the number of notifications received in the main loop at a time.
 	my $query = qq{
 DELETE FROM dbms_job.all_async_jobs
-WHERE job IN (SELECT job FROM dbms_job.all_async_jobs ORDER BY job LIMIT $jobcount)
+WHERE job IN (SELECT job FROM dbms_job.all_async_jobs ORDER BY job $limit)
 RETURNING *
 };
 	my $sth = $dbh->prepare($query);
