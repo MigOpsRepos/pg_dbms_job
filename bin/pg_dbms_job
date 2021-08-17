@@ -20,6 +20,7 @@ setlocale(LC_NUMERIC, '');
 setlocale(LC_ALL, 'C');
 use DBI;
 use DBD::Pg;
+use Time::HiRes;
 
 $| = 1;
 
@@ -31,7 +32,6 @@ $SIG{'CHLD'} = 'DEFAULT';
 # Global variables
 my $CONFIG_FILE  = "/etc/pg_dbms_job/pg_dbms_job.conf";
 my %CONFIG = (
-	'naptime' => 1, # wait 1 second between runs
 	'debug' => 0,
 	'pidfile' => '/tmp/pg_dbms_job.pid',
 	'logfile' => '',
@@ -63,10 +63,15 @@ my %PQSTATUS = (
 	11 => "Command didn't run because of an abort earlier in a pipeline"
 );
 
+# Time to wait in the main loop before each runs to free some CPU cycle
+my $naptime = 0.1;
+
 # Flag to terminate all actions and exit when SIGINT is received
 my $fini         = 0;
+
 # Flag to invalidate the job cache
 my $cache_invalidated = 0;
+
 # Main database connection handler
 my $dbh = undef;
 
@@ -259,8 +264,22 @@ while (!$fini)
 	# Connect to the database if this is not already the case
 	$dbh = connect_db() if (not defined $dbh);
 
+	# Look if we received some notification from the database
+	my $async_count = 0;
+	if (defined $dbh)
+	{
+		while (my $notify = $dbh->pg_notifies)
+		{
+			my ($topic, $pid, $payload) = @$notify;
+			dprint('LOG', "Received notification: ($topic, $pid, $payload)");
+			$async_count++ if ($topic eq 'dbms_job_async_notify');
+		}
+	}
+
 	# Get a list of asynchrous queued jobs to execute
-	%ASYNC_JOBS = get_async_jobs();
+	if ($async_count) {
+		%ASYNC_JOBS = get_async_jobs($async_count, %ASYNC_JOBS);
+	}
 
 	# Get jobs defined in the remote database if they are not
 	# already cached or that the cache have been invalidated.
@@ -274,19 +293,14 @@ while (!$fini)
 			&subprocess_asynchronous_jobs( $j );
 		};
 	}
-
-	# We can not loop quicker than naptime, 1 second by default
-	if ( $previous_time and $t0 < ($previous_time+$CONFIG{ 'naptime' }) )
-	{
-		# Wait next run following the interval value
-		sleep(1);
-	}
-	else
-	{
-		$previous_time = $t0;
-	}
+	%ASYNC_JOBS = ();
 
 	last if ($SINGLE);
+
+	# We can not loop quicker than naptime, 0.1 second by default
+	Time::HiRes::sleep($naptime);
+
+	$previous_time = $t0;
 }
 
 # Wait for last child stop
@@ -425,15 +439,6 @@ sub read_config
 					dprint('LOG', "Setting pidfile from configuration file to $CONFIG{ 'pidfile' }");
 				}
 			}
-			elsif ($var eq 'naptime')
-			{
-				$val = int($val);
-				if ($CONFIG{ 'naptime' } != $val)
-				{
-					$CONFIG{ 'naptime' } = $val;
-					dprint('LOG', "Setting naptime from configuration file to $CONFIG{ 'naptime' }");
-				}
-			}
 			elsif ($var eq 'debug')
 			{
 				$val = int($val);
@@ -552,6 +557,10 @@ sub connect_db
 		local_die("FATAL: another pg_dbms_job process is running on this database! Aborting.\n");
 	}
 
+	# Subscribe to pg_dbms_job notification channels
+	$ldbh->do("LISTEN dbms_job_cache_invalidate");
+	$ldbh->do("LISTEN dbms_job_async_notify");
+
 	return $ldbh;
 }
 
@@ -603,13 +612,14 @@ sub get_scheduled_jobs
 ####
 sub get_async_jobs
 {
+	my $jobcount = shift;
 	my %asyncjobs = ();
 
-	# Get all jobs to be executed asap from table ALL_ASYNC_JOBS. It is limitted
-	# to async_limit at a time to avoid forking too much process in a loop.
+	# Get jobs to be executed asap from table ALL_ASYNC_JOBS limitted
+	# to the number of notifications received in the main loop at a time.
 	my $query = qq{
 DELETE FROM dbms_job.all_async_jobs
-WHERE job IN (SELECT job FROM dbms_job.all_async_jobs ORDER BY job LIMIT $CONFIG{ 'async_limit' })
+WHERE job IN (SELECT job FROM dbms_job.all_async_jobs ORDER BY job LIMIT $jobcount)
 RETURNING *
 };
 	my $sth = $dbh->prepare($query);

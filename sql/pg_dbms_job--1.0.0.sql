@@ -218,28 +218,49 @@ CREATE FUNCTION dbms_job.job_cache_invalidate()
 BEGIN
     -- When a change occurs in the all_jobs table, notify the scheduler
     IF TG_OP = 'UPDATE' THEN
-	PERFORM pg_notify('job_cache_invalidate', TG_OP || ':' || OLD.job || ':' || NEW.job);
+	PERFORM pg_notify('dbms_job_cache_invalidate', TG_OP || ':' || OLD.job || ':' || NEW.job);
 	RETURN NEW;
     END IF;
     IF TG_OP = 'INSERT' THEN
-	PERFORM pg_notify('job_cache_invalidate', TG_OP || ':' || NEW.job);
+	PERFORM pg_notify('dbms_job_cache_invalidate', TG_OP || ':' || NEW.job);
 	RETURN NEW;
     END IF;
     IF TG_OP = 'DELETE' THEN
-	PERFORM pg_notify('job_cache_invalidate', TG_OP || ':' || OLD.job);
+	PERFORM pg_notify('dbms_job_cache_invalidate', TG_OP || ':' || OLD.job);
 	RETURN OLD;
     END IF;
     -- TRUNCATE
-    PERFORM pg_notify('job_cache_invalidate', TG_OP);
+    PERFORM pg_notify('dbms_job_cache_invalidate', TG_OP);
     RETURN OLD;
 END;
 $$;
 COMMENT ON FUNCTION dbms_job.job_cache_invalidate()
-    IS 'Invalidate job cache by notifying the client';
+    IS 'Notify the scheduler that the job cache must be invalidated';
 
 -- When there is a modification in the JOB table invalidate the cache
 -- to inform the background worker to reread the table
-CREATE TRIGGER dbms_job_job_cache_invalidate
+CREATE TRIGGER dbms_job_cache_invalidate_trg
     AFTER INSERT OR UPDATE OR DELETE OR TRUNCATE
     ON dbms_job.all_jobs
     FOR STATEMENT EXECUTE FUNCTION dbms_job.job_cache_invalidate();
+
+CREATE FUNCTION dbms_job.job_async_notify()
+    RETURNS trigger
+    LANGUAGE PLPGSQL
+    AS $$
+BEGIN
+    -- When a new async job is submitted, notify the scheduler
+    PERFORM pg_notify('dbms_job_async_notify', 'New asynchronous job received');
+    RETURN NEW;
+END;
+$$;
+COMMENT ON FUNCTION dbms_job.job_async_notify()
+    IS 'Notify the scheduler that a new asynchronous job was submitted';
+
+-- When there is a new asynchronous job submited
+-- to inform the daemon to reread the table
+CREATE TRIGGER dbms_job_async_notify_trg
+    AFTER INSERT
+    ON dbms_job.all_async_jobs
+    FOR STATEMENT EXECUTE FUNCTION dbms_job.job_async_notify();
+

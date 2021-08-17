@@ -70,7 +70,6 @@ The format of the configuration file is the same as postgresql.conf.
 
 - `debug`: debug mode. Default 0, disabled.
 - `pidfile`: path to pid file. Default to `/tmp/pg_dbms_job.pid`
-- `naptime`: time to wait between each scheduler runs in seconds. Default 1 second.
 - `logfile`: path to log file. Default `/tmp/pg_dbms_job.log`
 `async_limit`: number of asynchrounous job to run at each scheduler loop. Default 10.
 
@@ -91,8 +90,6 @@ The format of the configuration file is the same as postgresql.conf.
 debug=0
 # Path to the pid file
 pidfile=/tmp/pg_dbms_job.pid
-# Time to wait between runs in seconds. Default 1 second.
-naptime=1
 # log file
 logfile=/tmp/pg_dbms_job.log
 # Asynchrounous job running at same time limit
