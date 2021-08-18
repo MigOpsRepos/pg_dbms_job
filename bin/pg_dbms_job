@@ -78,6 +78,9 @@ my $cache_invalidated = 0;
 # Flag for initial import of jobs
 my $startup = 1;
 
+# Maximim number of job processed at the same time
+my $job_queue_processes = 1000;
+
 # Process command line options
 my $result = GetOptions
 (
@@ -304,11 +307,17 @@ while (!$fini)
 	$startup = 0;
 
 	# Process all the asynchronous jobs in a dedicated process each.
-	foreach my $j (sort { $a <=> $b } keys %ASYNC_JOBS)
+	my $i = 1;
+	foreach my $job (sort { $a <=> $b } keys %ASYNC_JOBS)
 	{
+		# If we have forked too much processes wait one second until a process die
+		while (scalar keys %RUNNING_PIDS >= $job_queue_processes) {
+			sleep(1);
+		}
+
 		spawn sub
 		{
-			&subprocess_asynchronous_jobs( $j );
+			&subprocess_asynchronous_jobs( $job );
 		};
 	}
 	%ASYNC_JOBS = ();
