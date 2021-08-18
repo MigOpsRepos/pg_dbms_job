@@ -5,9 +5,11 @@ DO $$
 DECLARE
 jobid bigint;
 BEGIN
-	-- Asynchronous job, must be executed immediately
+	-- Asynchronous job, must be executed immediately, there
+	-- is no interval and next_date is set to current timestamp
 	SELECT dbms_job.submit(
-		'INSERT INTO noexisttable VALUES (NULL);' -- what
+		'BEGIN INSERT INTO noexisttable VALUES (NULL); END;', -- what
+		LOCALTIMESTAMP, NULL
 	) INTO jobid;
 END;
 $$;

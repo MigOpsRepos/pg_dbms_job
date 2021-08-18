@@ -59,7 +59,7 @@ CREATE TABLE dbms_job.all_scheduler_job_run_details (
 	owner name, -- owner of the scheduler job
 	job_name varchar(261), -- name of the scheduler job
 	job_subname varchar(261), -- Subname of the Scheduler job (for a chain step job)
-	status varchar(128), -- status of the job run
+	status text, -- status of the job run
 	error char(5), -- error code in the case of an error
 	req_start_date timestamp with time zone, -- requested start date of the job run
 	actual_start_date timestamp with time zone, -- actual date on which the job was run

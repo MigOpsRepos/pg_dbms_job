@@ -66,14 +66,14 @@ my %PQSTATUS = (
 # Time to wait in the main loop before each runs to free some CPU cycle
 my $naptime = 0.1;
 
+# Main database connection handler
+my $dbh = undef;
+
 # Flag to terminate all actions and exit when SIGINT is received
 my $fini         = 0;
 
 # Flag to invalidate the job cache
 my $cache_invalidated = 0;
-
-# Main database connection handler
-my $dbh = undef;
 
 # Flag for initial import of jobs
 my $startup = 1;
@@ -289,13 +289,19 @@ while (!$fini)
 
 	# Get a list of asynchrous queued jobs to execute
 	if ($async_count || $startup) {
-		%ASYNC_JOBS = get_async_jobs($async_count, $startup);
+		%ASYNC_JOBS = get_async_jobs($async_count);
 	}
-	$startup = 0;
 
 	# Get jobs defined in the remote database if they are not
 	# already cached or that the cache have been invalidated.
-	%JOBS_CACHE = get_scheduled_jobs() if ($cache_invalidated or scalar keys %JOBS_CACHE == 0);
+	if ($cache_invalidated || $startup)
+	{
+		%JOBS_CACHE = get_scheduled_jobs();
+	}
+
+	# Init flags
+	$cache_invalidated = 0;
+	$startup = 0;
 
 	# Process all the asynchronous jobs in a dedicated process each.
 	foreach my $j (sort { $a <=> $b } keys %ASYNC_JOBS)
@@ -584,14 +590,10 @@ sub connect_db
 ####
 sub get_scheduled_jobs
 {
-	if ($cache_invalidated)
-	{
-		dprint('LOG', 'initializing jobs cache');
-		$cache_invalidated = 0;
-	}
+	dprint('LOG', 'initializing jobs cache');
 
 	# Get all jobs from table ALL_JOBS
-	my $query = "SELECT * FROM dbms_job.all_jobs ORDER BY job";
+	my $query = "SELECT * FROM dbms_job.all_jobs job ORDER BY job";
 	my $sth = $dbh->prepare($query);
 	if (!defined $sth)
 	{
@@ -624,14 +626,14 @@ sub get_scheduled_jobs
 ####
 sub get_async_jobs
 {
-	my ($jobcount, $readall) = @_;
+	my ($jobcount) = @_;
 
 	my %asyncjobs = ();
 	my $limit = '';
 
 	# At startup we load all pending jobs to execute, in this case jobcount
 	# is equal to 0 otherwise limit the jobs returned in this loop.
-	$limit = "LIMIT $jobcount" if ($jobcount && !$readall);
+	$limit = "LIMIT $jobcount" if ($jobcount && !$startup);
 
 	# Get jobs to be executed asap from table ALL_ASYNC_JOBS limitted
 	# to the number of notifications received in the main loop at a time.
@@ -730,9 +732,20 @@ sub subprocess_asynchronous_jobs
 		my $status = '';
 		my $sqlstate = '';
 		my $t0 = time;
+
+		my $codetoexec = qq{DO \$\$
+DECLARE
+	job bigint := $jobid;
+	next_date timestamp with time zone := current_timestamp;
+	broken boolean := false;
+BEGIN
+	$ASYNC_JOBS{ $jobid }{ 'what' }
+END;
+\$\$;
+};
 		dprint('LOG', "executing code of job id $jobid: $ASYNC_JOBS{ $jobid }{ 'what' }");
 		# Execute the code of the WHAT column
-		if (not $ldbh->do($ASYNC_JOBS{ $jobid }{ 'what' }))
+		if (not $ldbh->do($codetoexec))
 		{
 			$success = 0;
 			$errstr = $ldbh->errstr;

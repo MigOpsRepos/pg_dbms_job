@@ -22,7 +22,7 @@ sleep(2);
 
 # Stop the daemon
 $ret = `perl bin/pg_dbms_job -c test/regress_dbms_job.conf -k`;
-sleep(3);
+sleep(1);
 # We should have the daemon and the child still running,
 # the current running jobs must not be stopped
 $ret = `ps auwx | grep pg_dbms_job | grep -v grep | wc -l`;
@@ -30,7 +30,7 @@ chomp($ret);
 ok( $ret eq "2", "Daemon pg_dbms_job and subprocess are still running: $ret");
 
 # Be sure that the job have been processed
-sleep(2);
+sleep(3);
 
 # Look if the job have been registered in the history table
 my $ret = `psql -d regress_dbms_job -Atc "SET ROLE regress_dbms_job_user;SELECT count(*) FROM dbms_job.all_scheduler_job_run_details;"`;
