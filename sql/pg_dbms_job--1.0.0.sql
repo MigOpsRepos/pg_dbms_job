@@ -4,9 +4,11 @@
 DROP SCHEMA IF EXISTS dbms_job CASCADE; 
 CREATE SCHEMA IF NOT EXISTS dbms_job;
 
+CREATE SEQUENCE dbms_job.jobseq;
+
 -- Table used to store the jobs to run by the scheduler
 CREATE TABLE dbms_job.all_scheduled_jobs (
-        job bigserial primary key, -- identifier of job
+        job bigint DEFAULT nextval('dbms_job.jobseq') PRIMARY KEY, -- identifier of job
         log_user name DEFAULT current_user, -- user that submit the job
         priv_user name DEFAULT current_user, -- user whose default privileges apply to this job (not used)
         schema_user text DEFAULT current_setting('search_path'), -- default schema used to parse the job
@@ -35,7 +37,7 @@ CREATE POLICY dbms_job_policy ON dbms_job.all_scheduled_jobs USING (log_user = c
 
 -- Create the asynchronous jobs queue, for immediat execution
 CREATE TABLE dbms_job.all_async_jobs (
-        job bigserial primary key, -- identifier of job.
+        job bigint DEFAULT nextval('dbms_job.jobseq') PRIMARY KEY, -- identifier of job
         log_user name DEFAULT current_user, -- user that submit the job
         schema_user text DEFAULT current_setting('search_path'), -- default search_path used to execute the job
         create_date timestamp with time zone DEFAULT current_timestamp, -- date on which this job has been created.
