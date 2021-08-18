@@ -12,6 +12,8 @@ If a scheduled job completes successfully, then its new execution date is placed
 
 This extension consist in a SQL script to create all the objects related to its operation and a daemon that must be run attached to the database where job are defined. The daemon is responsible to execute the queued asynchronous jobs and the scheduled ones. It should be running on the same host or both host should have the same time synchronization source.
 
+The number of job that can be executed at the same time is limited to 1000.
+
 ## Installation
 
 There is no special requirement to run this extension but your PostgreSQL version must support extensions (>= 9.1) and Perl must be available as well as the DBI and DBD::Pg Perl modules. If your distribution doesn't include these Perl modules you can always install them using CPAN:
@@ -109,10 +111,10 @@ passwd=gilles
 
 ### Scheduled jobs
 
-Jobs to run are stored in table `dbms_job.all_jobs` which is the same structure as the one in Oracle. Some columns are just here for compatibility but are not used. They are executed when current timestamp of the scheduler daemon is upper or equal to the date defined in the `next_date` attribute.
+Jobs to run are stored in table `dbms_job.all_scheduled_jobs` which is the same structure as the one in Oracle. Some columns are just here for compatibility but are not used. They are executed when current timestamp of the scheduler daemon is upper or equal to the date defined in the `next_date` attribute.
 
 ```
-CREATE TABLE dbms_job.all_jobs
+CREATE TABLE dbms_job.all_scheduled_jobs
 (
         job bigserial primary key, -- identifier of job
         log_user name DEFAULT current_user, -- user that submit the job

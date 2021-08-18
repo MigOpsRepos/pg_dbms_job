@@ -5,7 +5,7 @@ DROP SCHEMA IF EXISTS dbms_job CASCADE;
 CREATE SCHEMA IF NOT EXISTS dbms_job;
 
 -- Table used to store the jobs to run by the scheduler
-CREATE TABLE dbms_job.all_jobs (
+CREATE TABLE dbms_job.all_scheduled_jobs (
         job bigserial primary key, -- identifier of job
         log_user name DEFAULT current_user, -- user that submit the job
         priv_user name DEFAULT current_user, -- user whose default privileges apply to this job (not used)
@@ -25,13 +25,13 @@ CREATE TABLE dbms_job.all_jobs (
 	misc_env bytea, -- Other session parameters that apply to this job (not used)
 	instance integer DEFAULT 0 -- ID of the instance that can execute or is executing the job (not used)
 );
-COMMENT ON TABLE dbms_job.all_jobs
+COMMENT ON TABLE dbms_job.all_scheduled_jobs
     IS 'Table used to store the periodical jobs to run by the scheduler.';
-REVOKE ALL ON dbms_job.all_jobs FROM PUBLIC;
+REVOKE ALL ON dbms_job.all_scheduled_jobs FROM PUBLIC;
 
 -- The user can only see the job that he has created
-ALTER TABLE dbms_job.all_jobs ENABLE ROW LEVEL SECURITY;
-CREATE POLICY dbms_job_policy ON dbms_job.all_jobs USING (log_user = current_user);
+ALTER TABLE dbms_job.all_scheduled_jobs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY dbms_job_policy ON dbms_job.all_scheduled_jobs USING (log_user = current_user);
 
 -- Create the asynchronous jobs queue, for immediat execution
 CREATE TABLE dbms_job.all_async_jobs (
@@ -39,9 +39,6 @@ CREATE TABLE dbms_job.all_async_jobs (
         log_user name DEFAULT current_user, -- user that submit the job
         schema_user text DEFAULT current_setting('search_path'), -- default search_path used to execute the job
         create_date timestamp with time zone DEFAULT current_timestamp, -- date on which this job has been created.
-        this_date timestamp with time zone, -- date that this job started executing (usually null if not executing)
-        total_time interval, -- total wall clock time spent by the system on this job, in seconds
-        failed boolean DEFAULT false, -- inform that this job has a failure
         what text NOT NULL -- body of the anonymous pl/sql block that the job executes
 );
 COMMENT ON TABLE dbms_job.all_async_jobs
@@ -51,6 +48,18 @@ REVOKE ALL ON dbms_job.all_async_jobs FROM PUBLIC;
 -- The user can only see the job that he has created
 ALTER TABLE dbms_job.all_async_jobs ENABLE ROW LEVEL SECURITY;
 CREATE POLICY dbms_job_policy ON dbms_job.all_async_jobs USING (log_user = current_user);
+
+-- Create a view similar to DMBS_JOB.ALL_JOBS
+CREATE VIEW dbms_job.all_jobs AS
+    SELECT * FROM dbms_job.all_scheduled_jobs
+    UNION
+    SELECT job, log_user, NULL priv_user, schema_user, NULL last_date, NULL last_sec,
+           NULL this_date, NULL this_sec, create_date next_date, NULL next_sec, NULL total_time,
+	   'N' broken, NULL "interval", NULL failures, what, NULL nls_env, NULL misc_env,
+	   NULL instance FROM dbms_job.all_async_jobs;
+COMMENT ON VIEW dbms_job.all_jobs
+    IS 'View registering all jobs to be run asynchronously or scheduled.';
+REVOKE ALL ON dbms_job.all_jobs FROM PUBLIC;
 
 -- Create a table to store the result of the job execution
 CREATE TABLE dbms_job.all_scheduler_job_run_details (
@@ -86,7 +95,7 @@ CREATE PROCEDURE dbms_job.broken(
 		broken    IN  boolean,
 		next_date IN  timestamp with time zone DEFAULT current_timestamp)
     LANGUAGE SQL
-    AS 'UPDATE dbms_job.all_jobs SET broken=$2,next_date=$3 WHERE job=$1';
+    AS 'UPDATE dbms_job.all_scheduled_jobs SET broken=$2,next_date=$3 WHERE job=$1';
 COMMENT ON PROCEDURE dbms_job.broken(bigint,boolean,timestamp with time zone)
     IS 'Disables job execution. Broken jobs are never run.';
 REVOKE ALL ON PROCEDURE dbms_job.broken FROM PUBLIC;
@@ -99,7 +108,7 @@ CREATE PROCEDURE dbms_job.change(
 		instance     IN  bigint DEFAULT 0,
 		force        IN  boolean DEFAULT false)
     LANGUAGE SQL
-    AS 'UPDATE dbms_job.all_jobs SET what=$2,next_date=$3,interval=$4 WHERE job=$1';
+    AS 'UPDATE dbms_job.all_scheduled_jobs SET what=$2,next_date=$3,interval=$4 WHERE job=$1';
 COMMENT ON PROCEDURE dbms_job.change(bigint,text,timestamp with time zone,text,bigint,boolean)
     IS 'Alters any of the user-definable parameters associated with a job';
 REVOKE ALL ON PROCEDURE dbms_job.change FROM PUBLIC;
@@ -108,7 +117,7 @@ CREATE PROCEDURE dbms_job.interval(
 		job           IN  bigint,
 		job_interval  IN  text)
     LANGUAGE SQL
-    AS 'UPDATE dbms_job.all_jobs SET interval=$2 WHERE job=$1';
+    AS 'UPDATE dbms_job.all_scheduled_jobs SET interval=$2 WHERE job=$1';
 COMMENT ON PROCEDURE dbms_job.interval(bigint,text)
     IS 'Alters the interval between executions for a specified job';
 REVOKE ALL ON PROCEDURE dbms_job.interval FROM PUBLIC;
@@ -117,7 +126,7 @@ CREATE PROCEDURE dbms_job.next_date(
 		job        IN  bigint,
 		next_date  IN  timestamp with time zone)
     LANGUAGE SQL
-    AS 'UPDATE dbms_job.all_jobs SET next_date=$2 WHERE job=$1';
+    AS 'UPDATE dbms_job.all_scheduled_jobs SET next_date=$2 WHERE job=$1';
 COMMENT ON PROCEDURE dbms_job.next_date(bigint,timestamp with time zone)
     IS 'Alters the next execution time for a specified job';
 REVOKE ALL ON PROCEDURE dbms_job.next_date FROM PUBLIC;
@@ -125,7 +134,7 @@ REVOKE ALL ON PROCEDURE dbms_job.next_date FROM PUBLIC;
 CREATE PROCEDURE dbms_job.remove(
 		job        IN  bigint)
     LANGUAGE SQL
-    AS 'DELETE FROM dbms_job.all_jobs WHERE job=$1';
+    AS 'DELETE FROM dbms_job.all_scheduled_jobs WHERE job=$1';
 COMMENT ON PROCEDURE dbms_job.remove(bigint)
     IS 'Removes specified job from the job queue';
 REVOKE ALL ON PROCEDURE dbms_job.remove FROM PUBLIC;
@@ -145,7 +154,7 @@ BEGIN
     END IF;
 
     -- Get the job definition
-    SELECT what, schema_user INTO v_what, v_path FROM dbms_job.all_jobs WHERE job = $1;
+    SELECT what, schema_user INTO v_what, v_path FROM dbms_job.all_scheduled_jobs WHERE job = $1;
     start_t :=  clock_timestamp();
     -- Execute the job
     BEGIN
@@ -156,11 +165,11 @@ BEGIN
     EXCEPTION
 	WHEN others THEN
 	    -- Increase the failure count
-	    UPDATE dbms_job.all_jobs SET failure = failure + 1 WHERE job= $1;
+	    UPDATE dbms_job.all_scheduled_jobs SET failure = failure + 1 WHERE job= $1;
     END;
     end_t :=  clock_timestamp();
     -- Update job's statistics
-    UPDATE dbms_job.all_jobs SET 
+    UPDATE dbms_job.all_scheduled_jobs SET 
 	last_date = end_t,
 	last_sec = end_t,
 	this_date = start_t,
@@ -185,14 +194,14 @@ CREATE FUNCTION dbms_job.submit(
 BEGIN
     -- When an interval is defined this is a job to be scheduled
     IF job_interval IS NOT NULL THEN
-        INSERT INTO dbms_job.all_jobs (what,next_date,interval) VALUES ($2,$3,$4) RETURNING job INTO jobid;
+        INSERT INTO dbms_job.all_scheduled_jobs (what,next_date,interval) VALUES ($2,$3,$4) RETURNING job INTO jobid;
     ELSE
-	-- With no interval verify if the job is planned
-	-- in the future or must be exexuted immediatly
+	-- With no interval verify if the job is planned in
+	-- the future or that it must be executed immediatly
         IF next_date > current_timestamp THEN
-            INSERT INTO dbms_job.all_jobs (what,next_date,interval) VALUES ($2,$3,$4) RETURNING job INTO jobid;
+            INSERT INTO dbms_job.all_scheduled_jobs (what,next_date,interval) VALUES ($2,$3,$4) RETURNING job INTO jobid;
         ELSE
-            -- This is a immediate asynchronous execution
+            -- This is an immediate asynchronous execution, use the special queue
             INSERT INTO dbms_job.all_async_jobs (what) VALUES ($2) RETURNING job INTO jobid;
         END IF;
     END IF;
@@ -206,7 +215,7 @@ CREATE PROCEDURE dbms_job.what(
 		job       IN  bigint,
 		what      IN  text)
     LANGUAGE SQL
-    AS 'UPDATE dbms_job.all_jobs SET what=$2 WHERE job=$1';
+    AS 'UPDATE dbms_job.all_scheduled_jobs SET what=$2 WHERE job=$1';
 COMMENT ON PROCEDURE dbms_job.what(bigint,text)
     IS 'Alters the job description for a specified job';
 REVOKE ALL ON PROCEDURE dbms_job.what FROM PUBLIC;
@@ -216,7 +225,7 @@ CREATE FUNCTION dbms_job.job_cache_invalidate()
     LANGUAGE PLPGSQL
     AS $$
 BEGIN
-    -- When a change occurs in the all_jobs table, notify the scheduler
+    -- When a change occurs in the all_scheduled_jobs table, notify the scheduler
     IF TG_OP = 'UPDATE' THEN
 	PERFORM pg_notify('dbms_job_cache_invalidate', TG_OP || ':' || OLD.job || ':' || NEW.job);
 	RETURN NEW;
@@ -241,7 +250,7 @@ COMMENT ON FUNCTION dbms_job.job_cache_invalidate()
 -- to inform the background worker to reread the table
 CREATE TRIGGER dbms_job_cache_invalidate_trg
     AFTER INSERT OR UPDATE OR DELETE OR TRUNCATE
-    ON dbms_job.all_jobs
+    ON dbms_job.all_scheduled_jobs
     FOR STATEMENT EXECUTE FUNCTION dbms_job.job_cache_invalidate();
 
 CREATE FUNCTION dbms_job.job_async_notify()

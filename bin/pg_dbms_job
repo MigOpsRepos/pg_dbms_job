@@ -602,7 +602,7 @@ sub get_scheduled_jobs
 	dprint('LOG', 'initializing jobs cache');
 
 	# Get all jobs from table ALL_JOBS
-	my $query = "SELECT * FROM dbms_job.all_jobs job ORDER BY job";
+	my $query = "SELECT * FROM dbms_job.all_scheduled_jobs jobs ORDER BY job";
 	my $sth = $dbh->prepare($query);
 	if (!defined $sth)
 	{
