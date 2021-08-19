@@ -78,8 +78,12 @@ my $cache_invalidated = 0;
 # Flag for initial import of jobs
 my $startup = 1;
 
-# Maximim number of job processed at the same time
+# Maximum number of job processed at the same time
 my $job_queue_processes = 1000;
+
+# Interval to force a pool of the job queue in case there was no
+# notification to execute old scheduled jobs. Default 5 seconds.
+my $job_queue_interval = 5;
 
 # Process command line options
 my $result = GetOptions
@@ -244,7 +248,7 @@ close($fhp);
 # Entering main loop
 ####
 dprint('LOG', "Entering main loop.");
-my $previous_time = 0;
+my $previous_async_exec = 0;
 # exit loop when SIGTERM is received or we are running in single mode
 while (!$fini)
 {
@@ -290,9 +294,19 @@ while (!$fini)
 		next;
 	}
 
+	# In case we do not receive notification in the $job_queue_interval
+	# interval, force the collect of the async job to execute in case
+	# there is an old one with a next_date that has expired.
+	if ( !$async_count and !$startup and $t0 >= ($previous_async_exec+$job_queue_interval) ) {
+		dprint('DEBUG', "job_queue_interval reached, forcing collect of asynchronous jobs");
+		$async_count = 1;
+	}
+
 	# Get a list of asynchrous queued jobs to execute
 	if ($async_count || $startup) {
 		%ASYNC_JOBS = get_async_jobs($async_count);
+		# Register last execution time
+		$previous_async_exec = time;
 	}
 
 	# Get jobs defined in the remote database if they are not
@@ -326,8 +340,6 @@ while (!$fini)
 
 	# We can not loop quicker than naptime, 0.1 second by default
 	Time::HiRes::sleep($naptime);
-
-	$previous_time = $t0;
 }
 
 # Wait for last child stop
@@ -635,23 +647,40 @@ sub get_scheduled_jobs
 ####
 sub get_async_jobs
 {
-	my ($jobcount) = @_;
-
 	my %asyncjobs = ();
 	my $limit = '';
 
-	# At startup we load all pending jobs to execute, in this case jobcount
-	# is equal to 0 otherwise limit the jobs returned in this loop.
-	$limit = "LIMIT $jobcount" if ($jobcount && !$startup);
-
-	# Get jobs to be executed asap from table ALL_ASYNC_JOBS limitted
-	# to the number of notifications received in the main loop at a time.
-	my $query = qq{
-DELETE FROM dbms_job.all_async_jobs
-WHERE job IN (SELECT job FROM dbms_job.all_async_jobs ORDER BY job $limit)
-RETURNING *
-};
+	# Get all jobs to be executed asap from table ALL_ASYNC_JOBS
+	my $query = "DELETE FROM dbms_job.all_async_jobs RETURNING *";
 	my $sth = $dbh->prepare($query);
+	if (!defined $sth)
+	{
+		dprint('ERROR', "can't prepare statement, $DBI::errstr");
+		local_die("ERROR: can't prepare statement, $DBI::errstr\n");
+	}
+
+	$sth->execute;
+	if ($sth->err)
+	{
+		dprint('ERROR', "can't execute statement, $DBI::errstr");
+		local_die("ERROR: can't execute statement, $DBI::errstr\n");
+	}
+	while (my $row = $sth->fetchrow_hashref)
+	{
+		# Register the jobs information into a hash by job id
+		foreach my $k (keys %$row) {
+			$asyncjobs{$row->{job}}{$k} = $row->{$k}; 
+		}
+	}
+	$sth->finish();
+
+	# Get all jobs with no interval from table ALL_SCHEDULEd_JOBS
+	# where the next_date value is lower or equal to current timestamp
+	# as they also need to be executed immediately and removed from the
+	# dbms_job.all_scheduled_jobs table as they are no more used.
+	$query  = "DELETE FROM dbms_job.all_scheduled_jobs WHERE interval IS NULL";
+	$query .=  " AND next_date <= current_timestamp RETURNING *";
+	$sth = $dbh->prepare($query);
 	if (!defined $sth)
 	{
 		dprint('ERROR', "can't prepare statement, $DBI::errstr");
