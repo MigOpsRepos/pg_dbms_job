@@ -16,11 +16,11 @@ CREATE TABLE dbms_job.all_scheduled_jobs (
         last_sec text, -- same as last_date (not used)
         this_date timestamp with time zone, -- date that this job started executing
         this_sec text, -- same as this_date (not used)
-        next_date timestamp with time zone NOT NULL, -- date that this job will next be executed
+        next_date timestamp(0) with time zone NOT NULL, -- date that this job will next be executed
         next_sec timestamp with time zone, -- same as next_date (not used)
         total_time interval, -- total wall clock time spent by the system on this job, in seconds
         broken char(1), -- Y: no attempt is made to run this job, N: an attempt is made to run this job
-        interval text NOT NULL, -- a date function, evaluated at the start of execution, becomes next next_date
+        interval text, -- a date function, evaluated at the start of execution, becomes next next_date
         failures bigint, -- number of times the job has started and failed since its last success
         what text  NOT NULL, -- body of the anonymous pl/sql block that the job executes
         nls_env text, -- session parameters describing the nls environment of the job (not used)
@@ -95,7 +95,7 @@ CREATE POLICY dbms_job_policy ON dbms_job.all_scheduler_job_run_details USING (o
 CREATE PROCEDURE dbms_job.broken(
 		job       IN  bigint,
 		broken    IN  boolean,
-		next_date IN  timestamp with time zone DEFAULT current_timestamp)
+		next_date IN  timestamp(0) with time zone DEFAULT current_timestamp)
     LANGUAGE SQL
     AS 'UPDATE dbms_job.all_scheduled_jobs SET broken=$2,next_date=$3 WHERE job=$1';
 COMMENT ON PROCEDURE dbms_job.broken(bigint,boolean,timestamp with time zone)
@@ -105,7 +105,7 @@ REVOKE ALL ON PROCEDURE dbms_job.broken FROM PUBLIC;
 CREATE PROCEDURE dbms_job.change(
 		job          IN  bigint,
 		what         IN  text,
-		next_date    IN  timestamp with time zone,
+		next_date    IN  timestamp(0) with time zone,
 		job_interval IN  text,
 		instance     IN  bigint DEFAULT 0,
 		force        IN  boolean DEFAULT false)
@@ -126,7 +126,7 @@ REVOKE ALL ON PROCEDURE dbms_job.interval FROM PUBLIC;
 
 CREATE PROCEDURE dbms_job.next_date(
 		job        IN  bigint,
-		next_date  IN  timestamp with time zone)
+		next_date  IN  timestamp(0) with time zone)
     LANGUAGE SQL
     AS 'UPDATE dbms_job.all_scheduled_jobs SET next_date=$2 WHERE job=$1';
 COMMENT ON PROCEDURE dbms_job.next_date(bigint,timestamp with time zone)
@@ -187,7 +187,7 @@ REVOKE ALL ON PROCEDURE dbms_job.run FROM PUBLIC;
 CREATE FUNCTION dbms_job.submit(
 		jobid         OUT   bigint,
 		what          IN    text,
-		next_date     IN    timestamp with time zone DEFAULT current_timestamp,
+		next_date     IN    timestamp(0) with time zone DEFAULT current_timestamp,
 		job_interval  IN    text DEFAULT NULL,
 		no_parse      IN    boolean DEFAULT false)
     RETURNS bigint
@@ -227,6 +227,12 @@ CREATE FUNCTION dbms_job.job_cache_invalidate()
     LANGUAGE PLPGSQL
     AS $$
 BEGIN
+    -- Force interval to be NULL if this is an empty string
+    IF TG_OP = 'UPDATE' OR TG_OP = 'INSERT' THEN
+        IF NEW.interval = '' THEN
+            NEW.interval := NULL;
+        END IF;
+    END IF;
     -- When a change occurs in the all_scheduled_jobs table, notify the scheduler
     IF TG_OP = 'UPDATE' THEN
 	PERFORM pg_notify('dbms_job_cache_invalidate', TG_OP || ':' || OLD.job || ':' || NEW.job);
