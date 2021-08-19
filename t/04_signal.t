@@ -38,7 +38,7 @@ ok( $? == 0 && $ret eq "1", "Found $ret async job in the history");
 
 # Create another asynchronous job
 $ret = `psql -d regress_dbms_job -f test/sql/async.sql > /dev/null 2>&1`;
-ok( $? == 0, "Import pg_dbms_job schema");
+ok( $? == 0, "Submit job");
 sleep(2);
 
 # Interrupt immediatly the daemon

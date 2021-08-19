@@ -17,7 +17,7 @@ ok( $ret eq "1", "Daemon pg_dbms_job is not running");
 
 # Create an asynchronous job
 $ret = `psql -d regress_dbms_job -f test/sql/async.sql > /dev/null 2>&1`;
-ok( $? == 0, "Import pg_dbms_job schema");
+ok( $? == 0, "Submit job");
 sleep(2);
 
 # Stop the daemon
