@@ -11,7 +11,7 @@ ok( $? == 0, "truncate table dbms_job.all_scheduler_job_run_details");
 
 # Start the scheduler
 $ret = `perl bin/pg_dbms_job -c test/regress_dbms_job.conf`;
-$ret = `ps auwx | grep pg_dbms_job | grep -v grep | wc -l`;
+$ret = `ps auwx | grep pg_dbms_job: | grep -v grep | wc -l`;
 chomp($ret);
 ok( $ret eq "1", "Daemon pg_dbms_job is running");
 
@@ -24,7 +24,7 @@ sleep(2);
 $ret = `perl bin/pg_dbms_job -c test/regress_dbms_job.conf -r`;
 sleep(1);
 # We should have the daemon and the child still running,
-$ret = `ps auwx | grep pg_dbms_job | grep -v grep | wc -l`;
+$ret = `ps auwx | grep pg_dbms_job: | grep -v grep | wc -l`;
 chomp($ret);
 ok( $ret eq "2", "Daemon pg_dbms_job and subprocess are still running: $ret");
 
@@ -46,7 +46,7 @@ $ret = `perl bin/pg_dbms_job -c test/regress_dbms_job.conf -m`;
 sleep(5);
 
 # Now all process must be terminated
-$ret = `ps auwx | grep pg_dbms_job | grep -v grep | wc -l`;
+$ret = `ps auwx | grep pg_dbms_job: | grep -v grep | wc -l`;
 chomp($ret);
 ok( $ret eq "0", "Daemon pg_dbms_job is interrupted: $ret");
 

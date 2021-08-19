@@ -10,7 +10,7 @@ $ret = `ls /tmp/regress_dbms_job.* | wc -l`;
 chomp($ret);
 ok( $ret eq "2", "pg_dbms_job daemon started");
 # Verify that the process is running because of privilege issues
-$ret = `ps auwx | grep pg_dbms_job | grep -v grep | wc -l`;
+$ret = `ps auwx | grep pg_dbms_job: | grep -v grep | wc -l`;
 chomp($ret);
 ok( $ret eq "1", "Daemon pg_dbms_job is not running");
 
@@ -28,6 +28,6 @@ ok( $? == 0 && $ret eq "1", "Found $ret async job in the history");
 $ret = `perl bin/pg_dbms_job -c test/regress_dbms_job.conf -k`;
 sleep(2);
 # Now all process must be terminated
-$ret = `ps auwx | grep pg_dbms_job | grep -v grep | wc -l`;
+$ret = `ps auwx | grep pg_dbms_job: | grep -v grep | wc -l`;
 chomp($ret);
 ok( $ret eq "0", "Daemon pg_dbms_job is stopped");

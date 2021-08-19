@@ -39,7 +39,7 @@ chomp($ret);
 ok( $ret eq "2" , "Check for pid and log file creation");
 
 # Verify that the process is running
-$ret = `ps auwx | grep pg_dbms_job | grep -v grep | wc -l`;
+$ret = `ps auwx | grep pg_dbms_job: | grep -v grep | wc -l`;
 chomp($ret);
 ok( $ret eq "1", "Deamon pg_dbms_job is running");
 
@@ -62,6 +62,6 @@ chomp($ret);
 ok( $ret eq "0", "Check that pid file has been removed");
 
 # Verify that the process is stopped
-$ret = `ps auwx | grep pg_dbms_job | grep -v grep | wc -l`;
+$ret = `ps auwx | grep pg_dbms_job: | grep -v grep | wc -l`;
 chomp($ret);
 ok( $ret eq "0", "Deamon pg_dbms_job is not running");
