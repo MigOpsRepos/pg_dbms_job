@@ -115,24 +115,24 @@ Jobs to run are stored in table `dbms_job.all_scheduled_jobs` which is the same 
 
 ```
 CREATE TABLE dbms_job.all_scheduled_jobs (
-        job bigint DEFAULT nextval('dbms_job.jobseq') PRIMARY KEY, -- identifier of job
-        log_user name DEFAULT current_user, -- user that submit the job
-        priv_user name DEFAULT current_user, -- user whose default privileges apply to this job (not used)
-        schema_user text DEFAULT current_setting('search_path'), -- default schema used to parse the job
-        last_date timestamp with time zone, -- date on which this job last successfully executed
-        last_sec text, -- same as last_date (not used)
-        this_date timestamp with time zone, -- date that this job started executing
-        this_sec text, -- same as this_date (not used)
-        next_date timestamp(0) with time zone NOT NULL, -- date that this job will next be executed
-        next_sec timestamp with time zone, -- same as next_date (not used)
-        total_time interval, -- total wall clock time spent by the system on this job, in seconds
-        broken char(1), -- Y: no attempt is made to run this job, N: an attempt is made to run this job
-        interval text, -- a date function, evaluated at the start of execution, becomes next next_date
-        failures bigint, -- number of times the job has started and failed since its last success
-        what text  NOT NULL, -- body of the anonymous pl/sql block that the job executes
-        nls_env text, -- session parameters describing the nls environment of the job (not used)
-        misc_env bytea, -- Other session parameters that apply to this job (not used)
-        instance integer DEFAULT 0 -- ID of the instance that can execute or is executing the job (not used)
+	job bigint DEFAULT nextval('dbms_job.jobseq') PRIMARY KEY, -- identifier of job
+	log_user name DEFAULT current_user, -- user that submit the job
+	priv_user name DEFAULT current_user, -- user whose default privileges apply to this job (not used)
+	schema_user text DEFAULT current_setting('search_path'), -- default schema used to parse the job
+	last_date timestamp with time zone, -- date on which this job last successfully executed
+	last_sec text, -- same as last_date (not used)
+	this_date timestamp with time zone, -- date that this job started executing
+	this_sec text, -- same as this_date (not used)
+	next_date timestamp(0) with time zone NOT NULL, -- date that this job will next be executed
+	next_sec timestamp with time zone, -- same as next_date (not used)
+	total_time interval, -- total wall clock time spent by the system on this job, in seconds
+	broken boolean DEFAULT false, -- true: no attempt is made to run this job, false: an attempt is made to run this job
+	interval text, -- a date function, evaluated at the start of execution, becomes next next_date
+	failures bigint, -- number of times the job has started and failed since its last success
+	what text  NOT NULL, -- body of the anonymous pl/sql block that the job executes
+	nls_env text, -- session parameters describing the nls environment of the job (not used)
+	misc_env bytea, -- Other session parameters that apply to this job (not used)
+	instance integer DEFAULT 0 -- ID of the instance that can execute or is executing the job (not used)
 );
 ```
 
@@ -203,18 +203,18 @@ Disables job execution. This procedure sets the broken flag. Broken jobs are nev
 
 Syntax:
 
-	PG_DBMS_JOB.BROKEN ( 
+	pg_dbms_job.broken ( 
 		job       IN  bigint,
 		broken    IN  boolean
 		next_date IN  timestamp DEFAULT current_timestamp);
 
 Parameters:
 
-- job : ID of the job being run. To find this ID, query the JOB column of the USER_JOBS or DBA_JOBS view.
-- broken : Sets the job as broken or not broken. TRUE sets it as broken; FALSE sets it as not broken.
-- next_date : Next date when the job will be run.
+- job : ID of the job being run.
+- broken : Sets the job as broken or not broken. `true` sets it as broken; `false` sets it as not broken.
+- next_date : Next date when the job will be run, default is `current_timestamp`.
 
-If you set job as broken while it is running, Oracle resets the job's status to normal after the job completes. Therefore, only execute this procedure for jobs that are not running.
+If you set job as broken while it is running, unlike Oracle, the scheduler will not reset the job's status to normal after the job completes. Therefore, you can execute this procedure for jobs when they are running.
 
 
 ### CHANGE
@@ -223,7 +223,7 @@ Alters any of the user-definable parameters associated with a job
 
 Syntax:
 
-	DBMS_JOB.CHANGE ( 
+	dbms_job.change ( 
 		job       IN  bigint,
 		what      IN  text,
 		next_date IN  timestamp with time zone,
@@ -233,20 +233,22 @@ Syntax:
 
 Parameters:
 
-- job : ID of the job being run. To find this ID, query the JOB column of the USER_JOBS or DBA_JOBS view.
+- job : ID of the job being run.
 - what : PL/SQL procedure to run.
 - next_date : Next date when the job will be run.
 - interval : Date function; evaluated immediately before the job starts running.
 - instance : unused
 - force : unused
 
-Your job will not be available for processing by the job queue in the background until it is committed.
+Your job change will not be available for processing by the job queue in the background until it is committed.
 If the parameters what, next_date, or interval are NULL, then leave that value as it is.
 
 Example:
 
+Change the interval of execution of job 14144 to run every 3 days
+
 	BEGIN;
-	CALL PG_DBMS_JOB.CHANGE(14144, null, null, 'sysdate+3');
+	CALL pg_dbms_job.change(14144, null, null, 'current_timestamp + ''3 days''::interval');
 	COMMIT;
 
 ### INTERVAL
@@ -255,27 +257,40 @@ Alters the interval between executions for a specified job
 
 Syntax:
 
-	DBMS_JOB.INTERVAL ( 
+	dbms_job.interval ( 
 		job       IN  bigint,
 		interval  IN  text);
 
 Parameters:
 
-- job : ID of the job being run. To find this ID, query the JOB column of the USER_JOBS or DBA_JOBS view.
-- interval : Date function, evaluated immediately before the job starts running.
+- job : ID of the job being run.
+- interval : Code of the date function, evaluated immediately before the job starts running.
 
-If the job completes successfully, then this new date is placed in next_date. interval is evaluated by plugging it into the statement select interval into next_date from dual;
+If the job completes successfully, then this new date is placed in next_date. `interval` is evaluated by plugging it into the statement select interval into next_date;
 
-
-
-The interval parameter must evaluate to a time in the future. Legal intervals include:
-| Interval 	                  | Description             |
-|---------------------------------|-------------------------|
-| 'sysdate + 7'                   | Run once a week.        |
-| 'next_day(sysdate,''TUESDAY'')' | Run once every Tuesday. |
-| 'NULL'                          | Run only once.          |
+The interval parameter must evaluate to a time in the future.
 
 If interval evaluates to NULL and if a job completes successfully, then the job is automatically deleted from the queue.
+
+With Oracle this is the kind of interval values that we can find:
+
+- Execute daily: `SYSDATE + 1`
+- Execute once per week: `SYSDATE + 7`
+- Execute hourly: `SYSDATE + 1/24`
+- Execute every 2 hour: `SYSDATE + 2/24`
+- Execute every 12 hour: `SYSDATE + 12/24`
+- Execute every 10 min.: `SYSDATE + 10/1440`
+- Execute every 30 sec.: `SYSDATE + 30/86400`
+
+The equivalent to use with pg_dbms_job are the following:
+
+- Execute daily: `date_trunc('second',LOCALTIMESTAMP) + '1 day'::interval`
+- Execute once per week: `date_trunc('second',LOCALTIMESTAMP) + '7 days'::interval` or `date_trunc('second',current_timestamp) + '1 week'::interval`
+- Execute hourly: `date_trunc('second',LOCALTIMESTAMP) + '1 hour'::interval`
+- Execute every 2 hour: `date_trunc('second',LOCALTIMESTAMP) + '2 hours'::interval`
+- Execute every 12 hour: `date_trunc('second',LOCALTIMESTAMP) + '12 hours'::interval`
+- Execute every 10 min.: `date_trunc('second',LOCALTIMESTAMP) + '10 minutes'::interval`
+- Execute every 30 sec.: `date_trunc('second',LOCALTIMESTAMP) + '30 secondes'::interval`
 
 
 ### NEXT_DATE

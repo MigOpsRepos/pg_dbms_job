@@ -109,17 +109,51 @@ CREATE PROCEDURE dbms_job.change(
 		job_interval IN  text,
 		instance     IN  bigint DEFAULT 0,
 		force        IN  boolean DEFAULT false)
-    LANGUAGE SQL
-    AS 'UPDATE dbms_job.all_scheduled_jobs SET what=$2,next_date=$3,interval=$4 WHERE job=$1';
+    LANGUAGE PLPGSQL 
+    AS $$
+DECLARE
+    cols_modified text;
+BEGIN
+    -- If what, next_date or job_interval are NULL they are kept unchanged
+    IF what IS NOT NULL THEN
+	cols_modified := coalesce(cols_modified, '') || 'what=' || quote_literal(what) || ','; 
+    END IF;
+    IF next_date IS NOT NULL THEN
+	cols_modified := coalesce(cols_modified, '') || 'next_date=' || quote_literal(next_date) || ','; 
+    END IF;
+    IF job_interval IS NOT NULL THEN
+	cols_modified := coalesce(cols_modified, '') || 'interval=' || quote_literal(job_interval) || ','; 
+    END IF;
+    IF cols_modified IS NOT NULL THEN
+        EXECUTE 'UPDATE dbms_job.all_scheduled_jobs SET ' || rtrim(cols_modified, ',') || ' WHERE job=$1' USING job;
+    END IF;
+END;
+$$;
 COMMENT ON PROCEDURE dbms_job.change(bigint,text,timestamp with time zone,text,bigint,boolean)
     IS 'Alters any of the user-definable parameters associated with a job';
 REVOKE ALL ON PROCEDURE dbms_job.change FROM PUBLIC;
 
 CREATE PROCEDURE dbms_job.interval(
-		job           IN  bigint,
+		jobid           IN  bigint,
 		job_interval  IN  text)
-    LANGUAGE SQL
-    AS 'UPDATE dbms_job.all_scheduled_jobs SET interval=$2 WHERE job=$1';
+    LANGUAGE PLPGSQL 
+    AS $$
+DECLARE
+    next_date timestamp with time zone;
+BEGIN
+    IF job_interval IS NULL THEN
+        UPDATE dbms_job.all_scheduled_jobs SET interval = NULL WHERE job = jobid;
+    ELSE
+        -- interval must be in the future
+        next_date := dbms_job.get_next_date(job_interval);
+        IF next_date < current_timestamp THEN
+    	    RAISE EXCEPTION 'Interval must evaluate to a time in the future: %', next_date USING ERRCODE = '23420';
+        END IF;
+        UPDATE dbms_job.all_scheduled_jobs SET interval = quote_literal(job_interval) WHERE job = jobid;
+    END IF;
+END;
+$$;
+
 COMMENT ON PROCEDURE dbms_job.interval(bigint,text)
     IS 'Alters the interval between executions for a specified job';
 REVOKE ALL ON PROCEDURE dbms_job.interval FROM PUBLIC;
