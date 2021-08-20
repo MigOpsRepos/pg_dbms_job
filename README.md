@@ -114,9 +114,8 @@ passwd=gilles
 Jobs to run are stored in table `dbms_job.all_scheduled_jobs` which is the same structure as the one in Oracle. Some columns are just here for compatibility but are not used. They are executed when current timestamp of the scheduler daemon is upper or equal to the date defined in the `next_date` attribute.
 
 ```
-CREATE TABLE dbms_job.all_scheduled_jobs
-(
-        job bigserial primary key, -- identifier of job
+CREATE TABLE dbms_job.all_scheduled_jobs (
+        job bigint DEFAULT nextval('dbms_job.jobseq') PRIMARY KEY, -- identifier of job
         log_user name DEFAULT current_user, -- user that submit the job
         priv_user name DEFAULT current_user, -- user whose default privileges apply to this job (not used)
         schema_user text DEFAULT current_setting('search_path'), -- default schema used to parse the job
@@ -124,11 +123,11 @@ CREATE TABLE dbms_job.all_scheduled_jobs
         last_sec text, -- same as last_date (not used)
         this_date timestamp with time zone, -- date that this job started executing
         this_sec text, -- same as this_date (not used)
-        next_date timestamp with time zone NOT NULL, -- date that this job will next be executed
+        next_date timestamp(0) with time zone NOT NULL, -- date that this job will next be executed
         next_sec timestamp with time zone, -- same as next_date (not used)
         total_time interval, -- total wall clock time spent by the system on this job, in seconds
         broken char(1), -- Y: no attempt is made to run this job, N: an attempt is made to run this job
-        interval text NOT NULL, -- a date function, evaluated at the start of execution, becomes next next_date
+        interval text, -- a date function, evaluated at the start of execution, becomes next next_date
         failures bigint, -- number of times the job has started and failed since its last success
         what text  NOT NULL, -- body of the anonymous pl/sql block that the job executes
         nls_env text, -- session parameters describing the nls environment of the job (not used)
@@ -140,18 +139,18 @@ CREATE TABLE dbms_job.all_scheduled_jobs
 ### Asynchronous job
 
 Job submitted without execution date are jobs that need to be executed asynchronously as soon as possible after being created. They are stored in the queue (FIFO) table `dbms_job.all_async_jobs`.
-
-CREATE TABLE dbms_job.all_async_jobs
-(
-        job bigserial primary key, -- identifier of job.
+```
+CREATE TABLE dbms_job.all_async_jobs (
+        job bigint DEFAULT nextval('dbms_job.jobseq') PRIMARY KEY, -- identifier of job
         log_user name DEFAULT current_user, -- user that submit the job
         schema_user text DEFAULT current_setting('search_path'), -- default search_path used to execute the job
         create_date timestamp with time zone DEFAULT current_timestamp, -- date on which this job has been created.
-        this_date timestamp with time zone, -- date that this job started executing (usually null if not executing)
-        total_time interval, -- total wall clock time spent by the system on this job, in seconds
-        failed boolean DEFAULT false, -- inform that this job has a failure
         what text NOT NULL -- body of the anonymous pl/sql block that the job executes
 );
+```
+## DMBS_JOB.ALL_JOBS
+
+All jobs that have to be executed can be listed from the view `dbms_job.all_jobs`, this is the equivalent of the Oracle table DBMS_JOB.ALL_JOBS. THis view reports all jobs to be run by execution a union between the two tables described in previous chapters.
 
 ## Security
 
@@ -162,7 +161,9 @@ By default a user can not a job, he must be granted privileges to the pg_dbms_jo
 ```
 GRANT USAGE ON SCHEMA dbms_job TO <role>;
 GRANT ALL ON ALL TABLES IN SCHEMA dbms_job TO <role>;
-GRANT EXECUTE ON ALL ROUTINES IN SCHEMA dbms_job TO <role>;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA dbms_job TO <role>;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA dbms_job TO <role>;
+GRANT EXECUTE ON ALL PROCEDURES IN SCHEMA dbms_job TO <role>;
 ```
 
 A job will be taken in account by the scheduler only when the transaction where it has been created is committed. It is transactionnal so no risk that it will be executed if the transaction is aborted.
@@ -400,4 +401,26 @@ Parameters:
 
 - job : ID of the job being run. To find this ID, query the JOB column of the USER_JOBS or DBA_JOBS view.
 - what : PL/SQL procedure to run.
+
+## Schedule activity on specific intervals
+
+With Oracle this is the kind of interval values that we can find:
+
+- Execute daily: `SYSDATE + 1`
+- Execute once per week: `SYSDATE + 7`
+- Execute hourly: `SYSDATE + 1/24`
+- Execute every 2 hour: `SYSDATE + 2/24`
+- Execute every 12 hour: `SYSDATE + 12/24`
+- Execute every 10 min.: `SYSDATE + 10/1440`
+- Execute every 30 sec.: `SYSDATE + 30/86400`
+
+The equivalent to use with pg_dbms_job are the following:
+
+- Execute daily: `date_trunc('second',LOCALTIMESTAMP) + '1 day'::interval`
+- Execute once per week: `date_trunc('second',LOCALTIMESTAMP) + '7 days'::interval` or `date_trunc('second',current_timestamp) + '1 week'::interval`
+- Execute hourly: `date_trunc('second',LOCALTIMESTAMP) + '1 hour'::interval`
+- Execute every 2 hour: `date_trunc('second',LOCALTIMESTAMP) + '2 hours'::interval`
+- Execute every 12 hour: `date_trunc('second',LOCALTIMESTAMP) + '12 hours'::interval`
+- Execute every 10 min.: `date_trunc('second',LOCALTIMESTAMP) + '10 minutes'::interval`
+- Execute every 30 sec.: `date_trunc('second',LOCALTIMESTAMP) + '30 secondes'::interval`
 

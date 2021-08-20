@@ -44,7 +44,7 @@ my %RUNNING_PIDS = ();
 my %DBINFO       = ();
 my $HELP         = 0;
 my $SHOWVER      = 0;
-my %JOBS_CACHE   = ();
+my %SCHEDULED_JOBS   = ();
 my %ASYNC_JOBS   = ();
 my $SINGLE       = 0;
 
@@ -72,8 +72,8 @@ my $dbh = undef;
 # Flag to terminate all actions and exit when SIGINT is received
 my $fini         = 0;
 
-# Flag to invalidate the job cache
-my $cache_invalidated = 0;
+# Flag to signal that the configuration need to be reread
+my $config_invalidated = 0;
 
 # Flag for initial import of jobs
 my $startup = 1;
@@ -212,7 +212,7 @@ sub reload
 	}
 
 	# instruct main loop that it have to rebuild jobs cache
-	$cache_invalidated = 1;
+	$config_invalidated = 1;
 }
 
 # Die on kill -2, -3 or -15
@@ -249,13 +249,16 @@ close($fhp);
 ####
 dprint('LOG', "Entering main loop.");
 my $previous_async_exec = 0;
+my $previous_scheduled_exec = 0;
 # exit loop when SIGTERM is received or we are running in single mode
 while (!$fini)
 {
 	# Stores loop start time
 	my $t0 = time;
 
-	# look if there some child process that die
+	####
+	# look if there are some child processes dead to register
+	####
 	foreach my $k (keys %RUNNING_PIDS)
 	{
 		my $kid = waitpid(-1, WNOHANG);
@@ -264,7 +267,9 @@ while (!$fini)
 		}
 	}
 
-	if ($cache_invalidated)
+	# When the configuration is invalidated we must also disconnect
+	# from the database in case the connection settings have changed
+	if ($config_invalidated)
 	{
 		# We need to reconnect in the main loop
 		$dbh->disconnect() if (defined $dbh);
@@ -274,8 +279,11 @@ while (!$fini)
 	# Connect to the database if this is not already the case
 	$dbh = connect_db() if (not defined $dbh);
 
-	# Look if we received some notification from the database
+	####
+	# Look if we have received some notification from the database
+	####
 	my $async_count = 0;
+	my $scheduled_count = 0;
 	if (defined $dbh)
 	{
 		while (my $notify = $dbh->pg_notifies)
@@ -283,6 +291,7 @@ while (!$fini)
 			my ($topic, $pid, $payload) = @$notify;
 			dprint('LOG', "Received notification: ($topic, $pid, $payload)");
 			$async_count++ if ($topic eq 'dbms_job_async_notify');
+			$scheduled_count++ if ($topic eq 'dbms_job_scheduled_notify');
 		}
 	}
 	else
@@ -291,37 +300,69 @@ while (!$fini)
 		# wait one second and try again.
 		sleep(1);
 		$startup = 1;
+		$config_invalidated = 1;
 		next;
 	}
 
+	####
 	# In case we do not receive notification in the $job_queue_interval
 	# interval, force the collect of the async job to execute in case
 	# there is an old one with a next_date that has expired.
+	####
 	if ( !$async_count and !$startup and $t0 >= ($previous_async_exec+$job_queue_interval) ) {
 		dprint('DEBUG', "job_queue_interval reached, forcing collect of asynchronous jobs");
 		$async_count = 1;
 	}
+	if ( !$scheduled_count and !$startup and $t0 >= ($previous_scheduled_exec+$job_queue_interval) ) {
+		dprint('DEBUG', "job_queue_interval reached, forcing collect of scheduledhronous jobs");
+		$scheduled_count = 1;
+	}
 
+	####
 	# Get a list of asynchrous queued jobs to execute
-	if ($async_count || $startup) {
+	####
+	if ($async_count || $startup)
+	{
 		%ASYNC_JOBS = get_async_jobs($async_count);
 		# Register last execution time
 		$previous_async_exec = time;
 	}
 
+	####
 	# Get jobs defined in the remote database if they are not
 	# already cached or that the cache have been invalidated.
-	if ($cache_invalidated || $startup)
+	####
+	if ($scheduled_count || $startup)
 	{
-		%JOBS_CACHE = get_scheduled_jobs();
+		%SCHEDULED_JOBS = get_scheduled_jobs();
+		# Register last execution time
+		$previous_scheduled_exec = time;
 	}
 
 	# Init flags
-	$cache_invalidated = 0;
+	$config_invalidated = 0;
 	$startup = 0;
 
+	####
+	# Process all the scheduled jobs in a dedicated process each.
+	####
+	foreach my $job (sort { $a <=> $b } keys %SCHEDULED_JOBS)
+	{
+		# If we have forked too much processes wait one second until a process die
+		while (scalar keys %RUNNING_PIDS >= $job_queue_processes) {
+			sleep(1);
+		}
+
+		spawn sub
+		{
+			&subprocess_scheduled_jobs( $job );
+		};
+	}
+	%SCHEDULED_JOBS = ();
+
+	####
 	# Process all the asynchronous jobs in a dedicated process each.
-	my $i = 1;
+	####
 	foreach my $job (sort { $a <=> $b } keys %ASYNC_JOBS)
 	{
 		# If we have forked too much processes wait one second until a process die
@@ -605,16 +646,17 @@ sub connect_db
 
 ####
 # Get all jobs defined in the remote database.
-# In case of error the program is terminated.
-# FIXME: keep it alive and enter a wait mode to be able
-# to execute jobs once it is possible again ???
 ####
 sub get_scheduled_jobs
 {
 	dprint('LOG', 'initializing jobs cache');
 
-	# Get all jobs from table ALL_JOBS
-	my $query = "SELECT * FROM dbms_job.all_scheduled_jobs jobs ORDER BY job";
+	# Get all scheduled jobs from table ALL_JOBS that
+	# must be run and set the next execution date.
+	my $query  = "UPDATE dbms_job.all_scheduled_jobs SET";
+       	$query .= " next_date = dbms_job.get_next_date(interval),";
+       	$query .= " instance = instance+1"; # internal used only to not be notified for this change
+        $query .= " WHERE interval IS NOT NULL AND NOT broken AND next_date <= current_timestamp RETURNING *";
 	my $sth = $dbh->prepare($query);
 	if (!defined $sth)
 	{
@@ -706,7 +748,7 @@ sub get_async_jobs
 }
 
 ####
-# Execute the job's plpgsql code on te remote database
+# Execute the asynchronous job's plpgsql code on the remote database
 ####
 sub subprocess_asynchronous_jobs
 {
@@ -746,7 +788,7 @@ sub subprocess_asynchronous_jobs
 		{
 			if (not $ldbh->do("SET ROLE $ASYNC_JOBS{ $jobid }{ 'log_user' }")) {
 				# We don't take much more attention of this error here
-				dprint('ERROR', "can not start a transaction, reason: " . $ldbh->errstr);
+				dprint('ERROR', "can not change role, reason: " . $ldbh->errstr);
 			}
 		}
 
@@ -761,7 +803,7 @@ sub subprocess_asynchronous_jobs
 		{
 			if (not $ldbh->do("SET LOCAL search_path TO $ASYNC_JOBS{ $jobid }{ 'schema_user' }")) {
 				# We don't take much more attention of this error here
-				dprint('ERROR', "can not start a transaction, reason: " . $ldbh->errstr);
+				dprint('ERROR', "can not change the search_path, reason: " . $ldbh->errstr);
 			}
 		}
 
@@ -807,7 +849,7 @@ END;
 
 		my $t1 = time;
 		# Store the execution result in table all_job_run_details
-		my @ret = store_job_execution_details(  $ldbh,
+		my @ret = store_job_execution_details(  $ldbh, $ASYNC_JOBS{ $jobid }{ 'log_user' },
 							$jobid, $start_t, $t1 - $t0,
 							$status, $errstr, $success, $sqlstate);
 
@@ -825,12 +867,12 @@ END;
 ####
 sub store_job_execution_details
 {
-	my ($ldbh, $jobid, $start_date, $duration, $errstr, $pqstatus, $success, $sqlstate) = @_;
+	my ($ldbh, $owner, $jobid, $start_date, $duration, $errstr, $pqstatus, $success, $sqlstate) = @_;
 
 	$errstr =~ s/'/''/g;
 
 	my $query = "INSERT INTO dbms_job.all_scheduler_job_run_details (owner, job_name, status, error, req_start_date, actual_start_date, run_duration, slave_pid, additional_info)";
-	$query .= " VALUES ('" . $ASYNC_JOBS{ $jobid }{ 'log_user' } . "', '$jobid', ";
+	$query .= " VALUES ('$owner', '$jobid', ";
 	$query .= "'$pqstatus', '$sqlstate', NULL, '$start_date', $duration, ";
 	$query .= "$$, '$errstr')";
 
@@ -841,4 +883,155 @@ sub store_job_execution_details
 	}
 	return ();
 }
+
+####
+# Execute the scheduled job's plpgsql code on the remote database
+####
+sub subprocess_scheduled_jobs
+{
+	my $jobid = shift;
+
+	my $start_t = strftime('%Y-%m-%d %H:%M:%S', localtime);
+
+	$0 = "pg_dbms_job:scheduled:$jobid";
+
+	# Subprocess must completed their work in case
+	# of interruption unless we received SIGINT
+	$SIG{TERM} = 'IGNORE';
+	$SIG{HUP}  = 'IGNORE';
+
+	if ($CONFIG{ 'debug' })
+	{
+		dprint('LOG', "executing job $jobid");
+		foreach my $k (sort { $a <=> $b } keys %{ $SCHEDULED_JOBS{ $jobid } })
+		{
+			dprint('DEBUG', "job $jobid with parameter $k: $SCHEDULED_JOBS{ $jobid }{ $k }");
+		}
+	}
+
+	# Clone the connection to the database
+	my $ldbh = $dbh->clone();
+
+	if (defined $ldbh)
+	{
+		my $t0 = time;
+
+		# Set application name to pg_dbms_job:jobid
+		if (not $ldbh->do("SET application_name TO 'pg_dbms_job:scheduled:$jobid'")) {
+			# We don't take much more attention of this error here
+			dprint('ERROR', "can not set application_name, reason: " . $ldbh->errstr);
+		}
+
+		# Set role for the code execution
+		if ($SCHEDULED_JOBS{ $jobid }{ 'log_user' })
+		{
+			if (not $ldbh->do("SET ROLE $SCHEDULED_JOBS{ $jobid }{ 'log_user' }")) {
+				# We don't take much more attention of this error here
+				dprint('ERROR', "can not change role, reason: " . $ldbh->errstr);
+			}
+		}
+
+		# start a transaction
+		if (not $ldbh->do("BEGIN")) {
+			# We don't take much more attention of this error here
+			dprint('ERROR', "can not start a transaction, reason: " . $ldbh->errstr);
+		}
+
+		# Set search_path for the code execution
+		if ($SCHEDULED_JOBS{ $jobid }{ 'schema_user' })
+		{
+			if (not $ldbh->do("SET LOCAL search_path TO $SCHEDULED_JOBS{ $jobid }{ 'schema_user' }")) {
+				# We don't take much more attention of this error here
+				dprint('ERROR', "can not change the search_path, reason: " . $ldbh->errstr);
+			}
+		}
+
+		my $success = 1;
+		my $errstr = '';
+		my $status = '';
+		my $sqlstate = '';
+
+		my $codetoexec = qq{DO \$\$
+DECLARE
+	job bigint := $jobid;
+	next_date timestamp with time zone := current_timestamp;
+	broken boolean := false;
+BEGIN
+	$SCHEDULED_JOBS{ $jobid }{ 'what' }
+END;
+\$\$;
+};
+		dprint('LOG', "executing code of job id $jobid: $SCHEDULED_JOBS{ $jobid }{ 'what' }");
+		# Execute the code of the WHAT column
+		if (not $ldbh->do($codetoexec))
+		{
+			$success = 0;
+			$errstr = $ldbh->errstr;
+			$status = $PQSTATUS{$ldbh->err} || '';
+			$sqlstate = $ldbh->state || '';
+			dprint('ERROR', "job $jobid failure, reason: $errstr");
+			# Rollback the transaction
+			if (not $ldbh->do("ROLLBACK")) {
+				# We don't take much more attention of this error here
+				dprint('ERROR', "can not rollback a transaction, reason: " . $ldbh->errstr);
+			}
+			else
+			{
+				my $t1 = time;
+				my $timediff = $t1 - $t0;
+				# Update the begin execution date for this job and the total
+				# number of times that the job has failed to complete since
+				# it’s last successful execution.
+				my $updt = "UPDATE dbms_job.all_scheduled_jobs SET";
+				$updt   .= " this_date = current_timestamp - '$timediff seconds'::interval,";
+				$updt   .= " failures = failures+1,";
+				$updt   .= " WHERE job = $jobid";
+				if (not $ldbh->do($updt))
+				{
+					# We don't take much more attention of this error here
+					dprint('ERROR', "can not update dbms_job.all_scheduled_jobs for job id $jobid, reason: " . $ldbh->errstr);
+				}
+			}
+		}
+		else
+		{
+			# Commit the transaction
+			if (not $ldbh->do("COMMIT")) {
+				# We don't take much more attention of this error here
+				dprint('ERROR', "can not commit a transaction, reason: " . $ldbh->errstr);
+			}
+		}
+
+		my $t1 = time;
+
+		my $timediff = $t1 - $t0;
+		# Update the begin execution date for this job, the last successful execution date
+		# the total execution time of the job and reset the failure counter
+		my $updt = "UPDATE dbms_job.all_scheduled_jobs SET";
+		$updt   .= " this_date = current_timestamp - '$timediff seconds'::interval,";
+		$updt   .= " last_date = current_timestamp,";
+		$updt   .= " total_time = '$timediff seconds'::interval,";
+		$updt   .= " failures = 0,";
+		$updt   .= " instance = instance+1"; # internal used only to not be notified for this change
+		$updt   .= " WHERE job = $jobid";
+		if (not $ldbh->do($updt))
+		{
+			# We don't take much more attention of this error here
+			dprint('ERROR', "can not update dbms_job.all_scheduled_jobs for job id $jobid, reason: " . $ldbh->errstr);
+		}
+
+		# Store the execution result in table all_job_run_details
+		my @ret = store_job_execution_details(  $ldbh, $SCHEDULED_JOBS{ $jobid }{ 'log_user' },
+							$jobid, $start_t, $t1 - $t0,
+							$status, $errstr, $success, $sqlstate);
+
+		$ldbh->disconnect() if (defined $ldbh);
+		if ($#ret >= 0) {
+			print STDERR "ERROR: can't execute statement: \"$ret[0]\", $ret[1]\n";
+		}
+	}
+	dprint('LOG', "end of subprocess executing job $jobid");
+	exit(0);
+}
+
 

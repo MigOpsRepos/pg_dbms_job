@@ -19,7 +19,7 @@ CREATE TABLE dbms_job.all_scheduled_jobs (
         next_date timestamp(0) with time zone NOT NULL, -- date that this job will next be executed
         next_sec timestamp with time zone, -- same as next_date (not used)
         total_time interval, -- total wall clock time spent by the system on this job, in seconds
-        broken char(1), -- Y: no attempt is made to run this job, N: an attempt is made to run this job
+        broken boolean DEFAULT false, -- true: no attempt is made to run this job, false: an attempt is made to run this job
         interval text, -- a date function, evaluated at the start of execution, becomes next next_date
         failures bigint, -- number of times the job has started and failed since its last success
         what text  NOT NULL, -- body of the anonymous pl/sql block that the job executes
@@ -57,8 +57,8 @@ CREATE VIEW dbms_job.all_jobs AS
     UNION
     SELECT job, log_user, NULL priv_user, schema_user, NULL last_date, NULL last_sec,
            NULL this_date, NULL this_sec, create_date next_date, NULL next_sec, NULL total_time,
-	   'N' broken, NULL "interval", NULL failures, what, NULL nls_env, NULL misc_env,
-	   NULL instance FROM dbms_job.all_async_jobs;
+	   0 broken, NULL "interval", NULL failures, what, NULL nls_env, NULL misc_env,
+	   0 instance FROM dbms_job.all_async_jobs;
 COMMENT ON VIEW dbms_job.all_jobs
     IS 'View registering all jobs to be run asynchronously or scheduled.';
 REVOKE ALL ON dbms_job.all_jobs FROM PUBLIC;
@@ -222,32 +222,37 @@ COMMENT ON PROCEDURE dbms_job.what(bigint,text)
     IS 'Alters the job description for a specified job';
 REVOKE ALL ON PROCEDURE dbms_job.what FROM PUBLIC;
 
-CREATE FUNCTION dbms_job.job_cache_invalidate()
+CREATE FUNCTION dbms_job.job_scheduled_notify()
     RETURNS trigger
     LANGUAGE PLPGSQL
     AS $$
 BEGIN
-    -- Force interval to be NULL if this is an empty string
+    -- Force interval to be NULL if this is set to an empty string
     IF TG_OP = 'UPDATE' OR TG_OP = 'INSERT' THEN
         IF NEW.interval = '' THEN
             NEW.interval := NULL;
         END IF;
     END IF;
-    -- When a change occurs in the all_scheduled_jobs table, notify the scheduler
+    -- When a change occurs in the all_scheduled_jobs table, notify the scheduler.
     IF TG_OP = 'UPDATE' THEN
-	PERFORM pg_notify('dbms_job_cache_invalidate', TG_OP || ':' || OLD.job || ':' || NEW.job);
+	-- We do not notify the scheduler if it is at the origine of the UPDATE.
+        -- We increment the value of the instance column when this is an internal
+	-- update after an execution.
+        IF NEW.instance = OLD.instance THEN
+	    PERFORM pg_notify('dbms_job_scheduled_notify', TG_OP || ':' || OLD.job || ':' || NEW.job);
+        END IF;
 	RETURN NEW;
     END IF;
     IF TG_OP = 'INSERT' THEN
-	PERFORM pg_notify('dbms_job_cache_invalidate', TG_OP || ':' || NEW.job);
+	PERFORM pg_notify('dbms_job_scheduled_notify', TG_OP || ':' || NEW.job);
 	RETURN NEW;
     END IF;
     IF TG_OP = 'DELETE' THEN
-	PERFORM pg_notify('dbms_job_cache_invalidate', TG_OP || ':' || OLD.job);
+	PERFORM pg_notify('dbms_job_scheduled_notify', TG_OP || ':' || OLD.job);
 	RETURN OLD;
     END IF;
     -- TRUNCATE
-    PERFORM pg_notify('dbms_job_cache_invalidate', TG_OP);
+    PERFORM pg_notify('dbms_job_scheduled_notify', TG_OP);
     RETURN OLD;
 END;
 $$;
@@ -256,10 +261,10 @@ COMMENT ON FUNCTION dbms_job.job_cache_invalidate()
 
 -- When there is a modification in the JOB table invalidate the cache
 -- to inform the background worker to reread the table
-CREATE TRIGGER dbms_job_cache_invalidate_trg
+CREATE TRIGGER dbms_job_scheduled_notify_trg
     AFTER INSERT OR UPDATE OR DELETE OR TRUNCATE
     ON dbms_job.all_scheduled_jobs
-    FOR STATEMENT EXECUTE FUNCTION dbms_job.job_cache_invalidate();
+    FOR STATEMENT EXECUTE FUNCTION dbms_job.job_scheduled_notify();
 
 CREATE FUNCTION dbms_job.job_async_notify()
     RETURNS trigger
@@ -280,4 +285,18 @@ CREATE TRIGGER dbms_job_async_notify_trg
     AFTER INSERT
     ON dbms_job.all_async_jobs
     FOR STATEMENT EXECUTE FUNCTION dbms_job.job_async_notify();
+
+CREATE FUNCTION dbms_job.get_next_date(text)
+    RETURNS timestamp(0) with time zone
+    LANGUAGE PLPGSQL
+    AS $$
+DECLARE
+    next_date timestamp(0) with time zone;
+BEGIN
+	EXECUTE 'SELECT '||$1 INTO next_date;
+	RETURN next_date;
+END;
+$$;
+COMMENT ON FUNCTION dbms_job.get_next_date(text)
+    IS 'Used to get the next date returned by the interval code';
 
