@@ -1,6 +1,6 @@
 use Test::Simple tests => 8;
 
-# Test reload signal and interrupt, kill have been tested.
+# Test reload and interrupt signals, kill has already been tested.
 
 # Cleanup garbage from previous regression test runs
 `rm -f /tmp/regress_dbms_job.*`;

@@ -31,6 +31,9 @@ COMMENT ON TABLE dbms_job.all_scheduled_jobs
     IS 'Table used to store the periodical jobs to run by the scheduler.';
 REVOKE ALL ON dbms_job.all_scheduled_jobs FROM PUBLIC;
 
+-- Column next_date must have a value in the future
+ALTER TABLE dbms_job.all_scheduled_jobs ADD CONSTRAINT nextdate_check_future CHECK (next_date >= current_timestamp::timestamp(0) with time zone);
+
 -- The user can only see the job that he has created
 ALTER TABLE dbms_job.all_scheduled_jobs ENABLE ROW LEVEL SECURITY;
 CREATE POLICY dbms_job_policy ON dbms_job.all_scheduled_jobs USING (log_user = current_user);
@@ -93,11 +96,20 @@ CREATE POLICY dbms_job_policy ON dbms_job.all_scheduler_job_run_details USING (o
 -- Stored procedures
 ----
 CREATE PROCEDURE dbms_job.broken(
-		job       IN  bigint,
+		jobid     IN  bigint,
 		broken    IN  boolean,
 		next_date IN  timestamp(0) with time zone DEFAULT current_timestamp)
-    LANGUAGE SQL
-    AS 'UPDATE dbms_job.all_scheduled_jobs SET broken=$2,next_date=$3 WHERE job=$1';
+    LANGUAGE PLPGSQL
+    AS $$
+BEGIN
+    -- interval must be in the future
+    IF next_date < current_timestamp THEN
+        RAISE EXCEPTION 'next_val must be a time in the future: %', next_date USING ERRCODE = '23420';
+    END IF;
+    UPDATE dbms_job.all_scheduled_jobs SET broken=$2,next_date=$3 WHERE job=$1;
+END;
+$$;
+
 COMMENT ON PROCEDURE dbms_job.broken(bigint,boolean,timestamp with time zone)
     IS 'Disables job execution. Broken jobs are never run.';
 REVOKE ALL ON PROCEDURE dbms_job.broken FROM PUBLIC;
@@ -119,6 +131,10 @@ BEGIN
 	cols_modified := coalesce(cols_modified, '') || 'what=' || quote_literal(what) || ','; 
     END IF;
     IF next_date IS NOT NULL THEN
+        -- interval must be in the future
+        IF next_date < current_timestamp THEN
+            RAISE EXCEPTION 'next_date must be a time in the future: %', next_date USING ERRCODE = '23420';
+        END IF;
 	cols_modified := coalesce(cols_modified, '') || 'next_date=' || quote_literal(next_date) || ','; 
     END IF;
     IF job_interval IS NOT NULL THEN
@@ -159,10 +175,22 @@ COMMENT ON PROCEDURE dbms_job.interval(bigint,text)
 REVOKE ALL ON PROCEDURE dbms_job.interval FROM PUBLIC;
 
 CREATE PROCEDURE dbms_job.next_date(
-		job        IN  bigint,
+		jobid        IN  bigint,
 		next_date  IN  timestamp(0) with time zone)
-    LANGUAGE SQL
-    AS 'UPDATE dbms_job.all_scheduled_jobs SET next_date=$2 WHERE job=$1';
+    LANGUAGE PLPGSQL
+    AS $$
+BEGIN
+    IF next_date IS NULL THEN
+        RAISE EXCEPTION 'Next date can not be NULL';
+    END IF;
+    -- interval must be in the future
+    IF next_date < current_timestamp THEN
+        RAISE EXCEPTION 'next_date must be a time in the future: %', next_date USING ERRCODE = '23420';
+    END IF;
+    UPDATE dbms_job.all_scheduled_jobs SET next_date = $2 WHERE jobid = $1;
+END;
+$$;
+
 COMMENT ON PROCEDURE dbms_job.next_date(bigint,timestamp with time zone)
     IS 'Alters the next execution time for a specified job';
 REVOKE ALL ON PROCEDURE dbms_job.next_date FROM PUBLIC;
@@ -228,6 +256,10 @@ CREATE FUNCTION dbms_job.submit(
     LANGUAGE PLPGSQL
     AS $$
 BEGIN
+    -- interval must be in the future
+    IF next_date < current_timestamp THEN
+        RAISE EXCEPTION 'next_date must be a time in the future: %', next_date USING ERRCODE = '23420';
+    END IF;
     -- When an interval is defined this is a job to be scheduled
     IF job_interval IS NOT NULL THEN
         INSERT INTO dbms_job.all_scheduled_jobs (what,next_date,interval) VALUES ($2,$3,$4) RETURNING job INTO jobid;

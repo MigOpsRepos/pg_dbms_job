@@ -1,19 +1,19 @@
 use Test::Simple tests => 11;
 
+# Test scheduled job with an interval of 6 seconds
+
 # Cleanup garbage from previous regression test runs
 `rm -f /tmp/regress_dbms_job.*`;
-
-# Submit an asynchronous job and validate that queue_job_interval is respected
 
 # Start the scheduler
 $ret = `perl bin/pg_dbms_job -c test/regress_dbms_job.conf`;
 $ret = `ls /tmp/regress_dbms_job.* | wc -l`;
 chomp($ret);
 ok( $ret eq "2", "pg_dbms_job daemon started");
-# Verify that the process is running because of privilege issues
+# Verify that the process is running
 $ret = `ps auwx | grep pg_dbms_job: | grep -v grep | wc -l`;
 chomp($ret);
-ok( $ret eq "1", "Daemon pg_dbms_job is not running");
+ok( $ret eq "1", "Daemon pg_dbms_job is running");
 
 # Create an scheduled job that must be executed later in 3 seconds and each 6 seconds after
 $ret = `psql -d regress_dbms_job -f test/sql/scheduled.sql > /dev/null 2>&1`;

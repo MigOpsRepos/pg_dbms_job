@@ -38,17 +38,33 @@ Test of the extension can be done using:
 
     make installcheck
 
-Each database that needs to use DBMS_JOB must creates the extension:
+## Create/upgrade the extension
+
+Each database that needs to use `pg_dbms_job` must creates the extension:
 
     psql -d mydb -c "CREATE EXTENSION pg_dbms_job"
 
+To upgrade to a new version execute:
+
+    psql -d mydb -c 'ALTER EXTENSION pg_dbms_job UPDATE TO "1.1.0"'
+
+If you doesn't have the privileges to create an extension you can just import the extension file into the database, for example:
+
+    psql -d mydb -f sql/pg_dbms_job--1.0.0.sql
+
+This is especially useful for database in DBaas cloud services. To upgrade just import the extension upgrade files using psql.
+
+A dedicated scheduler per database using the extentionmust be started.
+
 ## Running the scheduler
 
-The scheduler is a Perl program that runs in background it must be executed as PostgreSQL superuser as follow:
+The scheduler is a Perl program that runs in background it can be executed by any system user as follow:
 
     pg_dbms_job -c /etc/pg_dbms_job/mydb-dbms_job.conf
 
 There must be one scheduler daemon running per database using the extension with a dedicated configuration file.
+
+The configuration file must define the database connection settings where the pg_dbms_job extension is used. This connection must be the extension tables owner or have the superuser privileges to be able to bypass the Row Level Security rules defined on the pg_dbms_job tables.
 
 ```
 usage: pg_dbms_job [options]
@@ -73,7 +89,6 @@ The format of the configuration file is the same as postgresql.conf.
 - `debug`: debug mode. Default 0, disabled.
 - `pidfile`: path to pid file. Default to `/tmp/pg_dbms_job.pid`
 - `logfile`: path to log file. Default `/tmp/pg_dbms_job.log`
-`async_limit`: number of asynchrounous job to run at each scheduler loop. Default 10.
 
 #### Database
 
@@ -94,8 +109,7 @@ debug=0
 pidfile=/tmp/pg_dbms_job.pid
 # log file
 logfile=/tmp/pg_dbms_job.log
-# Asynchrounous job running at same time limit
-async_limit=10
+
 #-------------
 #  Database
 #-------------
@@ -114,7 +128,8 @@ passwd=gilles
 Jobs to run are stored in table `dbms_job.all_scheduled_jobs` which is the same structure as the one in Oracle. Some columns are just here for compatibility but are not used. They are executed when current timestamp of the scheduler daemon is upper or equal to the date defined in the `next_date` attribute.
 
 ```
-CREATE TABLE dbms_job.all_scheduled_jobs (
+CREATE TABLE dbms_job.all_scheduled_jobs
+(
 	job bigint DEFAULT nextval('dbms_job.jobseq') PRIMARY KEY, -- identifier of job
 	log_user name DEFAULT current_user, -- user that submit the job
 	priv_user name DEFAULT current_user, -- user whose default privileges apply to this job (not used)
@@ -140,7 +155,8 @@ CREATE TABLE dbms_job.all_scheduled_jobs (
 
 Job submitted without execution date are jobs that need to be executed asynchronously as soon as possible after being created. They are stored in the queue (FIFO) table `dbms_job.all_async_jobs`.
 ```
-CREATE TABLE dbms_job.all_async_jobs (
+CREATE TABLE dbms_job.all_async_jobs
+(
         job bigint DEFAULT nextval('dbms_job.jobseq') PRIMARY KEY, -- identifier of job
         log_user name DEFAULT current_user, -- user that submit the job
         schema_user text DEFAULT current_setting('search_path'), -- default search_path used to execute the job
@@ -148,15 +164,15 @@ CREATE TABLE dbms_job.all_async_jobs (
         what text NOT NULL -- body of the anonymous pl/sql block that the job executes
 );
 ```
-## DMBS_JOB.ALL_JOBS
+## View DMBS_JOB.ALL_JOBS
 
 All jobs that have to be executed can be listed from the view `dbms_job.all_jobs`, this is the equivalent of the Oracle table DBMS_JOB.ALL_JOBS. THis view reports all jobs to be run by execution a union between the two tables described in previous chapters.
 
 ## Security
 
-Jobs are only visible by their own creator. A user can not access to a job defined by an other user unless it has the superuser privileges.
+Jobs are only visible by their own creator. A user can not access to a job defined by an other user unless it has the superuser privileges or it is the owner of the pg_dbms_job tables.
 
-By default a user can not a job, he must be granted privileges to the pg_dbms_job tables as follow.
+By default a user can not use pg_dbms_job, he must be granted privileges to the pg_dbms_job objects as follow.
 
 ```
 GRANT USAGE ON SCHEMA dbms_job TO <role>;
@@ -168,11 +184,11 @@ GRANT EXECUTE ON ALL PROCEDURES IN SCHEMA dbms_job TO <role>;
 
 A job will be taken in account by the scheduler only when the transaction where it has been created is committed. It is transactionnal so no risk that it will be executed if the transaction is aborted.
 
-When starting or when it is reloaded the pg_dbms_job daemon first checks that another daemon is not already attached to the same database. If this is the case it will refuse to continue and print a fatal message. This is a double verification, the first one is on an existing pid file and the second is done by looking at pg_stat_activity to see if a `pg_dbms_job:main` process already exists.
+When starting or when it is reloaded the pg_dbms_job daemon first checks that another daemon is not already attached to the same database. If this is the case it will refuse to continue. This is a double verification, the first one is on an existing pid file and the second is done by looking at pg_stat_activity to see if a `pg_dbms_job:main` process already exists.
 
 ## Job history
 
-Oracle DBMS_JOB doesn't provide a log history. This feature is available in DBMS_SCHEDULER and the past activity can be seen in table ALL_SCHEDULER_JOB_RUN_DETAILS. This extension stores all DBMS_JOB activity in a similar table named `dbms_job.all_scheduler_job_run_details`.
+Oracle DBMS_JOB doesn't provide a log history. This feature is available in DBMS_SCHEDULER and the past activity of nthe scheduler can be seen in table ALL_SCHEDULER_JOB_RUN_DETAILS. This extension stores all PG_DBMS_JOB activity in a similar table named `dbms_job.all_scheduler_job_run_details`.
 
 ```
 CREATE TABLE dbms_job.all_scheduler_job_run_details
@@ -214,8 +230,13 @@ Parameters:
 - broken : Sets the job as broken or not broken. `true` sets it as broken; `false` sets it as not broken.
 - next_date : Next date when the job will be run, default is `current_timestamp`.
 
-If you set job as broken while it is running, unlike Oracle, the scheduler will not reset the job's status to normal after the job completes. Therefore, you can execute this procedure for jobs when they are running.
+If you set job as broken while it is running, unlike Oracle, the scheduler will not reset the job's status to normal after the job completes. Therefore, you can execute this procedure for jobs when they are running they will be disabled.
 
+Example:
+
+	BEGIN;
+	CALL pg_dbms_job.broken(14144, true);
+	COMMIT;
 
 ### CHANGE
 
@@ -292,6 +313,11 @@ The equivalent to use with pg_dbms_job are the following:
 - Execute every 10 min.: `date_trunc('second',LOCALTIMESTAMP) + '10 minutes'::interval`
 - Execute every 30 sec.: `date_trunc('second',LOCALTIMESTAMP) + '30 secondes'::interval`
 
+Example:
+
+	BEGIN;
+	CALL pg_dbms_job.interval(14144, 'current_timestamp + '10 seconds'::interval);
+	COMMIT;
 
 ### NEXT_DATE
 
@@ -299,52 +325,60 @@ Alters the next execution time for a specified job
 
 Syntax:
 
-	DBMS_JOB.NEXT_DATE ( 
+	dbms_job.next_date ( 
 		job       IN  bigint,
 		next_date IN  timestamp with time zone);
 
 Parameters:
 
-- job : ID of the job being run. To find this ID, query the JOB column of the USER_JOBS or DBA_JOBS view.
+- job : ID of the job being run.
 - next_date : Date of the next refresh: it is when the job will be automatically run, assuming there are background processes attempting to run it.
-
-### REMOVE
-
-Removes specified job from the job queue
-
-Syntax:
-
-	DBMS_JOB.REMOVE ( 
-		job       IN  bigint);
-
-Parameters:
-
-- job : ID of the job being run. To find this ID, query the JOB column of the USER_JOBS or DBA_JOBS view.
 
 Example:
 
 	BEGIN;
-	CALL PG_DBMS_JOB.REMOVE(14144);
+	CALL pg_dbms_job.next_date(14144, current_timestamp + '1 day'::interval);
 	COMMIT;
 
-### RUN
+### REMOVE
 
-Forces a specified job to run. This procedure runs job JOB now. It runs even if it is broken.
-
-Running the job recomputes next_date. See data dictionary view USER_JOBS or DBA_JOBS.
+Removes specified job from the job queue.
 
 Syntax:
 
-	DBMS_JOB.RUN ( 
+	dbms_job.remove ( 
 		job       IN  bigint);
 
 Parameters:
 
-- job : ID of the job being run. To find this ID, query the JOB column of the USER_JOBS or DBA_JOBS view.
+- job : ID of the job being run.
 
-Example
+Example:
 
-	EXECUTE DBMS_JOB.RUN(14144);
+	BEGIN;
+	CALL pg_dbms_job.remove(14144);
+	COMMIT;
+
+### RUN
+
+Forces a specified job to run. This procedure runs the job now. It runs even if it is broken. If it was broken and it runs successfully, the job is updated to indicates that it is no longer broken and goes back to running on its schedule.
+
+Running the job recomputes next_date based on the time you run the procedure.
+
+Syntax:
+
+	dbms_job.run ( 
+		job       IN  bigint);
+
+Parameters:
+
+- job : ID of the job being run.
+
+Example:
+
+	BEGIN;
+	CALL pg_dbms_job.run(14144);
+	COMMIT;
 
 ### SUBMIT
 
@@ -354,53 +388,49 @@ Actually this is a function as PostgreSQL < 14 do not support out parameters.
 
 Syntax
 
-	DBMS_JOB.SUBMIT ( 
-		job       OUT BINARY_INTEGER,
-		what      IN  VARCHAR2,
-		[ next_date IN  DATE DEFAULT SYSDATE
-		[ , interval  IN  VARCHAR2 DEFAULT NULL
-		[ , no_parse  IN  BOOLEAN DEFAULT FALSE ] ] ] );
+	dbms_job.submit ( 
+		job       OUT bigint,
+		what      IN  text,
+		[ next_date IN  timestamp(0) with time zone DEFAULT current_timestamp
+		[ , interval  IN  text DEFAULT NULL
+		[ , no_parse  IN  boolean DEFAULT false ] ] ] );
 
 Parameters:
 
-- job : ID of the job being run. To find this ID, query the JOB column of the USER_JOBS or DBA_JOBS view
-- what : PL/SQL text o the job to be run. This must be a valid PL/SQL statement or block of code. For example, to run a stored procedure P, you could pass the string P; (with the semi-colon) to this routine. The SQL that you submit in the what parameter is wrapped in the following PL/SQL block:
-
-	DECLARE
-		job BINARY_INTEGER := :job;
-		next_date DATE := :mydate;
-		broken BOOLEAN := FALSE;
-	BEGIN
-		WHAT
-		:mydate := next_date;
-		IF broken THEN :b := 1; ELSE :b := 0; END IF;
-	END;
+- job : ID of the job being run.
+- what : text of the code to the job to be run. This must be a valid SQL statement or block of plpgsql code. The SQL code that you submit in the `what` parameter is wrapped in the following plpgsql block:
+```
+DO $$
+DECLARE
+    job bigint := $jobid;
+    next_date timestamp with time zone := current_timestamp;
+    broken boolean := false;
+BEGIN
+    WHAT
+END;
+$$;
+```
 
 Ensure that you include the ; semi-colon with the statement.
 
 - next_date : Next date when the job will be run.
 - interval : Date function that calculates the next time to run the job. The default is NULL. This must evaluate to a either a future point in time or NULL.
-- no_parse : A flag. The default is FALSE. If this is set to FALSE, then Oracle parses the procedure associated with the job. If this is set to TRUE, then Oracle parses the procedure associated with the job the first time that the job is run.
+- no_parse : Unused.
 
 Example:
 
-This submits a new job to the job queue. The job calls the procedure DBMS_DDL.ANALYZE_OBJECT to generate optimizer statistics for the table DQUON.ACCOUNTS. The statistics are based on a sample of half the rows of the ACCOUNTS table. The job is run every 24 hours:
+This submits a new job to the job queue. The job calls ANALYZE to generate optimizer statistics for the table public.accounts. The job is run every 24 hours:
 
-	VARIABLE jobno number;
+	BEGIN;
+	DO $$
+	DECLARE
+	    jobno bigint;
 	BEGIN
-	   DBMS_JOB.SUBMIT(:jobno, 
-	      'dbms_ddl.analyze_object(''TABLE'',
-	      ''DQUON'', ''ACCOUNTS'', 
-	      ''ESTIMATE'', NULL, 50);' 
-	      SYSDATE, 'SYSDATE + 1');
-	   COMMIT;
+	   SELECT dbms_job.submit(
+	      'ANALYZE public.accounts.',
+	      LOCALTIMESTAMP, 'LOCALTIMESTAMP + ''1 day''::interval') INTO jobno;
 	END;
-	/
-	Statement processed.
-	print jobno
-	JOBNO
-	----------
-	14144
+	COMMIT;
 
 ### WHAT
 
@@ -408,9 +438,9 @@ Alters the job description for a specified job. This procedure changes what an e
 
 Syntax:
 
-	DBMS_JOB.WHAT ( 
-		job       IN  BINARY_INTEGER,
-		what      IN  VARCHAR2);
+	dbms_job.what ( 
+		job       IN  bigint,
+		what      IN  text);
 
 Parameters:
 

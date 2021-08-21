@@ -1,5 +1,8 @@
 use Test::Simple tests => 15;
 
+# Test that the ademon can be started and stopped
+# as well as default privileges on objects
+
 # Cleanup garbage from previous regression test runs
 `rm -f /tmp/regress_dbms_job.*`;
 
