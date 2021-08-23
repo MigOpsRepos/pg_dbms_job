@@ -35,7 +35,6 @@ my %CONFIG = (
 	'debug' => 0,
 	'pidfile' => '/tmp/pg_dbms_job.pid',
 	'logfile' => '',
-	'async_limit' => 10
 );
 my $ABORT        = 0;
 my $KILL         = 0;
@@ -81,7 +80,7 @@ my $startup = 1;
 # Maximum number of job processed at the same time
 my $job_queue_processes = 1000;
 
-# Interval to force a pool of the job queue in case there was no
+# Interval to force a poll of the job queue in case there was no
 # notification to execute old scheduled jobs. Default 5 seconds.
 my $job_queue_interval = 5;
 
@@ -528,13 +527,13 @@ sub read_config
 					dprint('LOG', "Setting debug from configuration file to $CONFIG{ 'debug' }");
 				}
 			}
-			elsif ($var eq 'async_limit')
+			elsif ($var eq 'job_queue_interval')
 			{
 				$val = int($val);
-				if ($CONFIG{ 'async_limit' } != $val)
+				if ($job_queue_interval != $val)
 				{
-					$CONFIG{ 'async_limit' } = $val;
-					dprint('LOG', "Setting async_limit from configuration file to $CONFIG{ 'async_limit' }");
+					$job_queue_interval = $val;
+					dprint('LOG', "Setting job_queue_interval from configuration file to $job_queue_interval");
 				}
 			}
 			elsif ($var =~ /^(host|database|user|passwd|port)$/)

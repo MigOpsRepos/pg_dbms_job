@@ -14,6 +14,10 @@ This extension consist in a SQL script to create all the objects related to its 
 
 The number of job that can be executed at the same time is limited to 1000.
 
+The use of an external scheduler daemon instead of a background worker is a choice, being able to fork thousands of subprocess from a background worker is possibly not a good idea. The scheduler daemon can be run locally or on a remote server, the execution time of the jobs will always be taken on the database server.
+
+The job execution is caused by a NOTIFY event received by the scheduler when a new job is submitted or when a job is modified. The notifications are polled every 0.1 second. When there is no notification the scheduler polls every `job_queue_interval` seconds (5 seconds by default) the tables where job definition are stored. This mean that at worst a job will be executed `job_queue_interval` seconds after the next execution date defined.
+
 ## Installation
 
 There is no special requirement to run this extension but your PostgreSQL version must support extensions (>= 9.1) and Perl must be available as well as the DBI and DBD::Pg Perl modules. If your distribution doesn't include these Perl modules you can always install them using CPAN:
@@ -87,8 +91,9 @@ The format of the configuration file is the same as postgresql.conf.
 #### General
 
 - `debug`: debug mode. Default 0, disabled.
-- `pidfile`: path to pid file. Default to `/tmp/pg_dbms_job.pid`
-- `logfile`: path to log file. Default `/tmp/pg_dbms_job.log`
+- `pidfile`: path to pid file. Default to `/tmp/pg_dbms_job.pid`.
+- `logfile`: path to log file. Default `/tmp/pg_dbms_job.log`.
+- `job_queue_interval`: poll interval of the jobs queuei. Default 5 seconds.
 
 #### Database
 
@@ -215,7 +220,7 @@ CREATE TABLE dbms_job.all_scheduler_job_run_details
 
 ### BROKEN
 
-Disables job execution. This procedure sets the broken flag. Broken jobs are never run.
+Disables or suspend job execution. This procedure sets the broken flag. Broken jobs are never run.
 
 Syntax:
 
@@ -235,12 +240,12 @@ If you set job as broken while it is running, unlike Oracle, the scheduler will 
 Example:
 
 	BEGIN;
-	CALL pg_dbms_job.broken(14144, true);
+	CALL pg_dbms_job.broken(12345, true);
 	COMMIT;
 
 ### CHANGE
 
-Alters any of the user-definable parameters associated with a job
+Alters any of the user-definable parameters associated with a job. Any value you do not want to change can be specified as NULL.
 
 Syntax:
 
@@ -266,10 +271,10 @@ If the parameters what, next_date, or interval are NULL, then leave that value a
 
 Example:
 
-Change the interval of execution of job 14144 to run every 3 days
+Change the interval of execution of job 12345 to run every 3 days
 
 	BEGIN;
-	CALL pg_dbms_job.change(14144, null, null, 'current_timestamp + ''3 days''::interval');
+	CALL pg_dbms_job.change(12345, null, null, 'current_timestamp + ''3 days''::interval');
 	COMMIT;
 
 ### INTERVAL
@@ -316,7 +321,7 @@ The equivalent to use with pg_dbms_job are the following:
 Example:
 
 	BEGIN;
-	CALL pg_dbms_job.interval(14144, 'current_timestamp + '10 seconds'::interval);
+	CALL pg_dbms_job.interval(12345, 'current_timestamp + '10 seconds'::interval);
 	COMMIT;
 
 ### NEXT_DATE
@@ -337,12 +342,12 @@ Parameters:
 Example:
 
 	BEGIN;
-	CALL pg_dbms_job.next_date(14144, current_timestamp + '1 day'::interval);
+	CALL pg_dbms_job.next_date(12345, current_timestamp + '1 day'::interval);
 	COMMIT;
 
 ### REMOVE
 
-Removes specified job from the job queue.
+Removes specified job from the job queue. You can only remove jobs that you own. If this is run while the job is executing, it will not be interrupted but will not be run again.
 
 Syntax:
 
@@ -356,7 +361,7 @@ Parameters:
 Example:
 
 	BEGIN;
-	CALL pg_dbms_job.remove(14144);
+	CALL pg_dbms_job.remove(12345);
 	COMMIT;
 
 ### RUN
@@ -364,6 +369,8 @@ Example:
 Forces a specified job to run. This procedure runs the job now. It runs even if it is broken. If it was broken and it runs successfully, the job is updated to indicates that it is no longer broken and goes back to running on its schedule.
 
 Running the job recomputes next_date based on the time you run the procedure.
+
+When runs in foreground there is no logging to the jobs history table but information on the all_scheduled_jobs table atre updated in case of error or success. In case of error the exception is raise to the client.
 
 Syntax:
 
@@ -377,7 +384,7 @@ Parameters:
 Example:
 
 	BEGIN;
-	CALL pg_dbms_job.run(14144);
+	CALL pg_dbms_job.run(12345, false);
 	COMMIT;
 
 ### SUBMIT
@@ -444,28 +451,11 @@ Syntax:
 
 Parameters:
 
-- job : ID of the job being run. To find this ID, query the JOB column of the USER_JOBS or DBA_JOBS view.
+- job : ID of the job being run.
 - what : PL/SQL procedure to run.
 
-## Schedule activity on specific intervals
+Example:
 
-With Oracle this is the kind of interval values that we can find:
-
-- Execute daily: `SYSDATE + 1`
-- Execute once per week: `SYSDATE + 7`
-- Execute hourly: `SYSDATE + 1/24`
-- Execute every 2 hour: `SYSDATE + 2/24`
-- Execute every 12 hour: `SYSDATE + 12/24`
-- Execute every 10 min.: `SYSDATE + 10/1440`
-- Execute every 30 sec.: `SYSDATE + 30/86400`
-
-The equivalent to use with pg_dbms_job are the following:
-
-- Execute daily: `date_trunc('second',LOCALTIMESTAMP) + '1 day'::interval`
-- Execute once per week: `date_trunc('second',LOCALTIMESTAMP) + '7 days'::interval` or `date_trunc('second',current_timestamp) + '1 week'::interval`
-- Execute hourly: `date_trunc('second',LOCALTIMESTAMP) + '1 hour'::interval`
-- Execute every 2 hour: `date_trunc('second',LOCALTIMESTAMP) + '2 hours'::interval`
-- Execute every 12 hour: `date_trunc('second',LOCALTIMESTAMP) + '12 hours'::interval`
-- Execute every 10 min.: `date_trunc('second',LOCALTIMESTAMP) + '10 minutes'::interval`
-- Execute every 30 sec.: `date_trunc('second',LOCALTIMESTAMP) + '30 secondes'::interval`
-
+	BEGIN;
+	CALL dbms_job.what('ANALYZE public.accounts.');
+	COMMIT;
