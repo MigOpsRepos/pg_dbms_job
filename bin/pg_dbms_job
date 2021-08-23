@@ -649,7 +649,7 @@ sub connect_db
 ####
 sub get_scheduled_jobs
 {
-	dprint('LOG', 'initializing jobs cache');
+	dprint('LOG', 'Get scheduled jobs to run');
 
 	# Get all scheduled jobs from table ALL_JOBS that
 	# must be run and set the next execution date.
@@ -680,6 +680,8 @@ sub get_scheduled_jobs
 		}
 	}
 	$sth->finish();
+
+	dprint('LOG', "Found " . (scalar keys %alljobs) . " scheduled jobs to run");
 
 	return %alljobs;
 }

@@ -1,5 +1,6 @@
 -- Insert an asynchronous job that must be executed later
 TRUNCATE TABLE dbms_job.all_scheduler_job_run_details;
+TRUNCATE TABLE dbms_job.all_scheduled_jobs;
 SET ROLE regress_dbms_job_user;
 DO $$
 DECLARE

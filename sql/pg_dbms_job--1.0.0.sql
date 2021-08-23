@@ -31,9 +31,6 @@ COMMENT ON TABLE dbms_job.all_scheduled_jobs
     IS 'Table used to store the periodical jobs to run by the scheduler.';
 REVOKE ALL ON dbms_job.all_scheduled_jobs FROM PUBLIC;
 
--- Column next_date must have a value in the future
-ALTER TABLE dbms_job.all_scheduled_jobs ADD CONSTRAINT nextdate_check_future CHECK (next_date >= current_timestamp::timestamp(0) with time zone);
-
 -- The user can only see the job that he has created
 ALTER TABLE dbms_job.all_scheduled_jobs ENABLE ROW LEVEL SECURITY;
 CREATE POLICY dbms_job_policy ON dbms_job.all_scheduled_jobs USING (log_user = current_user);
@@ -204,42 +201,64 @@ COMMENT ON PROCEDURE dbms_job.remove(bigint)
 REVOKE ALL ON PROCEDURE dbms_job.remove FROM PUBLIC;
 
 CREATE PROCEDURE dbms_job.run(
-		job        IN  bigint)
+		jobid   IN bigint,
+		force   IN boolean DEFAULT false)
     LANGUAGE PLPGSQL
     AS $$
 DECLARE
-    v_what text;
-    v_path text;
-    start_t timestamp with time zone;
-    end_t timestamp with time zone;
+    v_what    text;
+    tmp_what  text;
+    start_t   timestamp with time zone;
+    end_t     timestamp with time zone;
+    v_state   text;
+    v_msg     text;
+    v_detail  text;
+    v_hint    text;
+    v_context text;
 BEGIN
-    IF job IS NULL THEN
+    IF jobid IS NULL THEN
 	RETURN;
     END IF;
-
     -- Get the job definition
-    SELECT what, schema_user INTO v_what, v_path FROM dbms_job.all_scheduled_jobs WHERE job = $1;
-    start_t :=  clock_timestamp();
-    -- Execute the job
-    BEGIN
-	IF v_path IS NOT NULL THEN
-	    EXECUTE 'SET LOCAL search_path TO $1' USING v_path;
-	END IF;
-	EXECUTE what;
-    EXCEPTION
-	WHEN others THEN
-	    -- Increase the failure count
-	    UPDATE dbms_job.all_scheduled_jobs SET failure = failure + 1 WHERE job= $1;
-    END;
-    end_t :=  clock_timestamp();
-    -- Update job's statistics
-    UPDATE dbms_job.all_scheduled_jobs SET 
-	last_date = end_t,
-	last_sec = end_t,
-	this_date = start_t,
-	this_sec = start_t,
-	total_time = total_time + (EXTRACT(EPOCH FROM end_t) - EXTRACT(EPOCH FROM start_t))::bigint
-    WHERE job = $1;
+    SELECT what INTO v_what FROM dbms_job.all_scheduled_jobs WHERE job = jobid;
+    -- When force is false execute the job immediatly in foreground
+    IF NOT force THEN
+        start_t :=  clock_timestamp();
+	-- Remove BEGIN/END from the code
+	SELECT regexp_replace(v_what, 'BEGIN\s+(.*)\s*END;', '\1', 'i') INTO tmp_what;
+        BEGIN
+    	EXECUTE tmp_what;
+        EXCEPTION
+    	WHEN others THEN
+            GET STACKED DIAGNOSTICS
+	        v_state   = RETURNED_SQLSTATE,
+                v_msg     = MESSAGE_TEXT,
+                v_detail  = PG_EXCEPTION_DETAIL,
+                v_hint    = PG_EXCEPTION_HINT,
+                v_context = PG_EXCEPTION_CONTEXT;
+    	    -- Increase the failure count
+    	    UPDATE dbms_job.all_scheduled_jobs SET
+	        failures = failures + 1,
+		this_date = start_t
+	    WHERE job = jobid;
+	    -- Restore the exception
+	    RAISE EXCEPTION '%', v_state USING message = v_msg, detail = vdetail, hint = v_hint;
+        END;
+        end_t :=  clock_timestamp();
+        -- Update job's statistics
+        UPDATE dbms_job.all_scheduled_jobs SET 
+            last_date = end_t,
+            this_date = start_t,
+            total_time = total_time + ((EXTRACT(EPOCH FROM end_t) - EXTRACT(EPOCH FROM start_t)) || ' seconds')::interval,
+            failures = 0,
+            instance = instance+1,
+            broken = false
+        WHERE job = jobid;
+	-- No write to history table in foreground mode
+    ELSE
+        -- Execute the job in background by submitting an asynchronous job
+	SELECT dbms_job.submit(v_what) INTO jobid;
+    END IF;
 END;
 $$;
 COMMENT ON PROCEDURE dbms_job.run(bigint)
