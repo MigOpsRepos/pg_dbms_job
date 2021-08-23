@@ -14,7 +14,7 @@ CREATE TABLE dbms_job.all_scheduled_jobs (
         schema_user text DEFAULT current_setting('search_path'), -- default schema used to parse the job
         last_date timestamp with time zone, -- date on which this job last successfully executed
         last_sec text, -- same as last_date (not used)
-        this_date timestamp with time zone, -- date that this job started executing
+        this_date timestamp with time zone, -- date that this job started executing, null when the job is not running
         this_sec text, -- same as this_date (not used)
         next_date timestamp(0) with time zone NOT NULL, -- date that this job will next be executed
         next_sec timestamp with time zone, -- same as next_date (not used)
@@ -104,6 +104,9 @@ BEGIN
         RAISE EXCEPTION 'next_val must be a time in the future: %', next_date USING ERRCODE = '23420';
     END IF;
     UPDATE dbms_job.all_scheduled_jobs SET broken=$2,next_date=$3 WHERE job=$1;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'null_value_not_allowed' USING detail = 'job number is not a job in the job queue';
+    END IF;
 END;
 $$;
 
@@ -122,23 +125,28 @@ CREATE PROCEDURE dbms_job.change(
     AS $$
 DECLARE
     cols_modified text;
+    future_date timestamp with time zone;
 BEGIN
     -- If what, next_date or job_interval are NULL they are kept unchanged
     IF what IS NOT NULL THEN
 	cols_modified := coalesce(cols_modified, '') || 'what=' || quote_literal(what) || ','; 
     END IF;
     IF next_date IS NOT NULL THEN
-        -- interval must be in the future
-        IF next_date < current_timestamp THEN
-            RAISE EXCEPTION 'next_date must be a time in the future: %', next_date USING ERRCODE = '23420';
-        END IF;
 	cols_modified := coalesce(cols_modified, '') || 'next_date=' || quote_literal(next_date) || ','; 
     END IF;
     IF job_interval IS NOT NULL THEN
+        -- interval must be in the future
+        future_date := dbms_job.get_next_date(job_interval);
+        IF future_date < current_timestamp THEN
+    	    RAISE EXCEPTION 'Interval must evaluate to a time in the future: %', future_date USING ERRCODE = '23420';
+        END IF;
 	cols_modified := coalesce(cols_modified, '') || 'interval=' || quote_literal(job_interval) || ','; 
     END IF;
     IF cols_modified IS NOT NULL THEN
         EXECUTE 'UPDATE dbms_job.all_scheduled_jobs SET ' || rtrim(cols_modified, ',') || ' WHERE job=$1' USING job;
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'null_value_not_allowed' USING detail = 'job number is not a job in the job queue';
+        END IF;
     END IF;
 END;
 $$;
@@ -164,6 +172,9 @@ BEGIN
         END IF;
         UPDATE dbms_job.all_scheduled_jobs SET interval = quote_literal(job_interval) WHERE job = jobid;
     END IF;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'null_value_not_allowed' USING detail = 'job number is not a job in the job queue';
+    END IF;
 END;
 $$;
 
@@ -180,11 +191,10 @@ BEGIN
     IF next_date IS NULL THEN
         RAISE EXCEPTION 'Next date can not be NULL';
     END IF;
-    -- interval must be in the future
-    IF next_date < current_timestamp THEN
-        RAISE EXCEPTION 'next_date must be a time in the future: %', next_date USING ERRCODE = '23420';
+    UPDATE dbms_job.all_scheduled_jobs SET next_date = $2 WHERE job = jobid;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'null_value_not_allowed' USING detail = 'job number is not a job in the job queue';
     END IF;
-    UPDATE dbms_job.all_scheduled_jobs SET next_date = $2 WHERE jobid = $1;
 END;
 $$;
 
@@ -193,9 +203,17 @@ COMMENT ON PROCEDURE dbms_job.next_date(bigint,timestamp with time zone)
 REVOKE ALL ON PROCEDURE dbms_job.next_date FROM PUBLIC;
 
 CREATE PROCEDURE dbms_job.remove(
-		job        IN  bigint)
-    LANGUAGE SQL
-    AS 'DELETE FROM dbms_job.all_scheduled_jobs WHERE job=$1';
+		jobid        IN  bigint)
+    LANGUAGE PLPGSQL
+    AS $$
+BEGIN
+    DELETE FROM dbms_job.all_scheduled_jobs WHERE job = jobid;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'null_value_not_allowed' USING detail = 'job number is not a job in the job queue';
+    END IF;
+END;
+$$;
+
 COMMENT ON PROCEDURE dbms_job.remove(bigint)
     IS 'Removes specified job from the job queue';
 REVOKE ALL ON PROCEDURE dbms_job.remove FROM PUBLIC;
@@ -221,38 +239,36 @@ BEGIN
     END IF;
     -- Get the job definition
     SELECT what INTO v_what FROM dbms_job.all_scheduled_jobs WHERE job = jobid;
+    IF v_what IS NULL THEN
+        RAISE EXCEPTION 'null_value_not_allowed' USING detail = 'job number is not a job in the job queue';
+    END IF;
     -- When force is false execute the job immediatly in foreground
     IF NOT force THEN
         start_t :=  clock_timestamp();
 	-- Remove BEGIN/END from the code
 	SELECT regexp_replace(v_what, 'BEGIN\s+(.*)\s*END;', '\1', 'i') INTO tmp_what;
+        UPDATE dbms_job.all_scheduled_jobs SET this_date = start_t WHERE job = jobid;
         BEGIN
     	EXECUTE tmp_what;
         EXCEPTION
     	WHEN others THEN
-            GET STACKED DIAGNOSTICS
-	        v_state   = RETURNED_SQLSTATE,
-                v_msg     = MESSAGE_TEXT,
-                v_detail  = PG_EXCEPTION_DETAIL,
-                v_hint    = PG_EXCEPTION_HINT,
-                v_context = PG_EXCEPTION_CONTEXT;
     	    -- Increase the failure count
     	    UPDATE dbms_job.all_scheduled_jobs SET
-	        failures = failures + 1,
-		this_date = start_t
+	        failures = failures + 1
 	    WHERE job = jobid;
-	    -- Restore the exception
-	    RAISE EXCEPTION '%', v_state USING message = v_msg, detail = vdetail, hint = v_hint;
+	    -- Rethrow the exception
+	    RAISE;
         END;
         end_t :=  clock_timestamp();
         -- Update job's statistics
         UPDATE dbms_job.all_scheduled_jobs SET 
             last_date = end_t,
-            this_date = start_t,
+            this_date = NULL,
             total_time = total_time + ((EXTRACT(EPOCH FROM end_t) - EXTRACT(EPOCH FROM start_t)) || ' seconds')::interval,
             failures = 0,
             instance = instance+1,
-            broken = false
+            broken = false,
+	    next_date = dbms_job.get_next_date(interval)
         WHERE job = jobid;
 	-- No write to history table in foreground mode
     ELSE
