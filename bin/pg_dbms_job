@@ -653,6 +653,7 @@ sub get_scheduled_jobs
 	# Get all scheduled jobs from table ALL_JOBS that
 	# must be run and set the next execution date.
 	my $query  = "UPDATE dbms_job.all_scheduled_jobs SET";
+	$query .= " this_date = current_timestamp,";
        	$query .= " next_date = dbms_job.get_next_date(interval),";
        	$query .= " instance = instance+1"; # internal used only to not be notified for this change
         $query .= " WHERE interval IS NOT NULL AND NOT broken AND next_date <= current_timestamp RETURNING *";
@@ -984,7 +985,7 @@ END;
 				# number of times that the job has failed to complete since
 				# it’s last successful execution.
 				my $updt = "UPDATE dbms_job.all_scheduled_jobs SET";
-				$updt   .= " this_date = current_timestamp - '$timediff seconds'::interval,";
+				$updt   .= " this_date = NULL,";
 				$updt   .= " failures = failures+1,";
 				$updt   .= " WHERE job = $jobid";
 				if (not $ldbh->do($updt))
@@ -1009,7 +1010,7 @@ END;
 		# Update the begin execution date for this job, the last successful execution date
 		# the total execution time of the job and reset the failure counter
 		my $updt = "UPDATE dbms_job.all_scheduled_jobs SET";
-		$updt   .= " this_date = current_timestamp - '$timediff seconds'::interval,";
+		$updt   .= " this_date = NULL,";
 		$updt   .= " last_date = current_timestamp,";
 		$updt   .= " total_time = '$timediff seconds'::interval,";
 		$updt   .= " failures = 0,";
