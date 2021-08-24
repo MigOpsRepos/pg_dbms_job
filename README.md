@@ -141,7 +141,7 @@ CREATE TABLE dbms_job.all_scheduled_jobs
 	schema_user text DEFAULT current_setting('search_path'), -- default schema used to parse the job
 	last_date timestamp with time zone, -- date on which this job last successfully executed
 	last_sec text, -- same as last_date (not used)
-	this_date timestamp with time zone, -- date that this job started executing
+	this_date timestamp with time zone, -- date that this job started executing, null when the job is not running
 	this_sec text, -- same as this_date (not used)
 	next_date timestamp(0) with time zone NOT NULL, -- date that this job will next be executed
 	next_sec timestamp with time zone, -- same as next_date (not used)

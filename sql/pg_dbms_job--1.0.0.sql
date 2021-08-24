@@ -126,6 +126,7 @@ CREATE PROCEDURE dbms_job.change(
 DECLARE
     cols_modified text;
     future_date timestamp with time zone;
+    v_ret bigint;
 BEGIN
     -- If what, next_date or job_interval are NULL they are kept unchanged
     IF what IS NOT NULL THEN
@@ -143,8 +144,8 @@ BEGIN
 	cols_modified := coalesce(cols_modified, '') || 'interval=' || quote_literal(job_interval) || ','; 
     END IF;
     IF cols_modified IS NOT NULL THEN
-        EXECUTE 'UPDATE dbms_job.all_scheduled_jobs SET ' || rtrim(cols_modified, ',') || ' WHERE job=$1' USING job;
-        IF NOT FOUND THEN
+        EXECUTE 'UPDATE dbms_job.all_scheduled_jobs SET ' || rtrim(cols_modified, ',') || ' WHERE job=$1 RETURNING job'INTO v_ret USING job;
+        IF v_ret IS NULL THEN
             RAISE EXCEPTION 'null_value_not_allowed' USING detail = 'job number is not a job in the job queue';
         END IF;
     END IF;

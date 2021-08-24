@@ -1,4 +1,4 @@
-use Test::Simple tests => 22;
+use Test::Simple tests => 21;
 
 # Test pg_dbms_job procedures
 
@@ -42,13 +42,9 @@ $job = `psql -d regress_dbms_job -Atc "SET ROLE regress_dbms_job_user;SELECT job
 chomp($job);
 ok( $? == 0 && $job ne "", "New job $job have been created");
 
-# Change the next execution date to the past, this is not allowed
-$ret = `psql -d regress_dbms_job -Atc "SET ROLE regress_dbms_job_user;CALL dbms_job.next_date($job, current_timestamp - '2 days'::interval);" > /dev/null 2>&1`;
-ok( $? != 0, "Can not set next_date in the past");
-
 # Change the next execution date to NULL
 $ret = `psql -d regress_dbms_job -Atc "SET ROLE regress_dbms_job_user;CALL dbms_job.next_date($job, NULL);" > /dev/null 2>&1`;
-ok( $? != 0, "Can not set next_date to NULL");
+ok( $? != 0, "Can not set next_date to NULL for job $job");
 
 # Change the next execution date to today + 1 year
 $ret = `psql -d regress_dbms_job -Atc "SET ROLE regress_dbms_job_user;CALL dbms_job.next_date($job, date_trunc('day', current_timestamp) + '1 year'::interval);"`;
@@ -88,7 +84,7 @@ ok( $? == 0, "Change all for job $job to NULL");
 # Verify that nothing have changed
 $ret = `psql -d regress_dbms_job -Atc "SET ROLE regress_dbms_job_user;SELECT count(*) FROM dbms_job.all_scheduled_jobs WHERE md5(what) = '9e5f15c5784fb71b23e3d6419475d6de' AND md5(interval) = 'a1024381477491357ed53285e69dd7e8' AND next_date = date_trunc('day', current_timestamp) + '1 year'::interval;"`;
 chomp($ret);
-ok( $? == 0 && $ret eq "1", "Job $job have been executed and removed");
+ok( $? == 0 && $ret eq "1", "Job $job is the same, nothing changed");
 
 # Change the modifiable columns
 $ret = `psql -d regress_dbms_job -Atc "SET ROLE regress_dbms_job_user;CALL dbms_job.change($job, 'VACUUM ANALYZE;', date_trunc('day', current_timestamp) + '1 day'::interval, 'current_timestamp + ''1 day''::interval');"`;
