@@ -228,7 +228,6 @@ if (!$SINGLE)
 	&dprint('LOG', "Detach from terminal with pid: $$");
 	open(STDIN , '<', "/dev/null");
 	open(STDOUT, '>', "/dev/null");
-	#open(STDERR, '>', "/dev/null");
 }
 
 # Set name of the program without path
@@ -296,8 +295,8 @@ while (!$fini)
 	else
 	{
 		# In case we can not connect to the database
-		# wait one second and try again.
-		sleep(1);
+		# wait three seconds and try again.
+		sleep(3);
 		$startup = 1;
 		$config_invalidated = 1;
 		next;
@@ -598,41 +597,48 @@ sub connect_db
 	my $ldbh = DBI->connect("dbi:Pg:dbname=$DBINFO{database};host=$DBINFO{host};port=$DBINFO{port}",
 						$DBINFO{user},
 						$DBINFO{passwd},
-						{AutoInactiveDestroy => 1, AutoCommit => 1});
+						{AutoInactiveDestroy => 1, PrintError => 0, AutoCommit => 1});
 	# Check for connection failure
 	if (not defined $ldbh)
 	{
 		dprint('FATAL', "can't connect to \"dbi:Pg:dbname=$DBINFO{database};host=$DBINFO{host};port=$DBINFO{port}\", $DBI::errstr");
-		local_die("FATAL: can't connect to \"dbi:Pg:dbname=$DBINFO{database};host=$DBINFO{host};port=$DBINFO{port}\", $DBI::errstr\n");
+		return undef;
 	}
 
 	# Set application name to pg_dbms_job:main
-	if (not $ldbh->do("SET application_name TO 'pg_dbms_job:main'")) {
-		# We don't take much more attention of this error here
+	if (not $ldbh->do("SET application_name TO 'pg_dbms_job:main'"))
+	{
 		dprint('ERROR', "can not set application_name, reason: " . $ldbh->errstr);
+		$ldbh->disconnect() if (defined $ldbh);
+		return undef;
 	}
 
-	# Now that we are connected veryfy that there is no other
+	####
+	# Now that we are connected verify that there is no other
 	# scheduler already runing on this database by looking for
 	# entries with the same application_name in pg_stat_activity
+	####
 	my $query = "SELECT count(*) FROM pg_catalog.pg_stat_activity WHERE datname='$DBINFO{database}' AND application_name='pg_dbms_job:main'";
 	my $sth = $ldbh->prepare($query);
 	if (!defined $sth)
 	{
 		dprint('ERROR', "can't prepare statement, $DBI::errstr");
-		local_die("ERROR: can't prepare statement, $DBI::errstr\n");
+		$ldbh->disconnect() if (defined $ldbh);
+		return undef;
 	}
 
 	$sth->execute;
 	if ($sth->err)
 	{
 		dprint('ERROR', "can't execute statement, $DBI::errstr");
-		local_die("ERROR: can't execute statement, $DBI::errstr\n");
+		$ldbh->disconnect() if (defined $ldbh);
+		return undef;
 	}
 	my @row = $sth->fetchrow;
 	if ($row[0] > 1)
 	{
 		dprint('FATAL', "another pg_dbms_job process is running on this database! Aborting.");
+		$ldbh->disconnect() if (defined $ldbh);
 		local_die("FATAL: another pg_dbms_job process is running on this database! Aborting.\n");
 	}
 
@@ -650,6 +656,8 @@ sub get_scheduled_jobs
 {
 	dprint('LOG', 'Get scheduled jobs to run');
 
+	my %alljobs = ();
+
 	# Get all scheduled jobs from table ALL_JOBS that
 	# must be run and set the next execution date.
 	my $query  = "UPDATE dbms_job.all_scheduled_jobs SET";
@@ -661,17 +669,16 @@ sub get_scheduled_jobs
 	if (!defined $sth)
 	{
 		dprint('ERROR', "can't prepare statement, $DBI::errstr");
-		local_die("ERROR: can't prepare statement, $DBI::errstr\n");
+		return %alljobs;
 	}
 
 	$sth->execute;
 	if ($sth->err)
 	{
 		dprint('ERROR', "can't execute statement, $DBI::errstr");
-		local_die("ERROR: can't execute statement, $DBI::errstr\n");
+		return %alljobs;
 	}
 
-	my %alljobs = ();
 	while (my $row = $sth->fetchrow_hashref)
 	{
 		# Register the jobs information into a hash by job id
@@ -700,14 +707,14 @@ sub get_async_jobs
 	if (!defined $sth)
 	{
 		dprint('ERROR', "can't prepare statement, $DBI::errstr");
-		local_die("ERROR: can't prepare statement, $DBI::errstr\n");
+		return %asyncjobs;
 	}
 
 	$sth->execute;
 	if ($sth->err)
 	{
 		dprint('ERROR', "can't execute statement, $DBI::errstr");
-		local_die("ERROR: can't execute statement, $DBI::errstr\n");
+		return %asyncjobs;
 	}
 	while (my $row = $sth->fetchrow_hashref)
 	{
@@ -728,14 +735,14 @@ sub get_async_jobs
 	if (!defined $sth)
 	{
 		dprint('ERROR', "can't prepare statement, $DBI::errstr");
-		local_die("ERROR: can't prepare statement, $DBI::errstr\n");
+		return %asyncjobs;
 	}
 
 	$sth->execute;
 	if ($sth->err)
 	{
 		dprint('ERROR', "can't execute statement, $DBI::errstr");
-		local_die("ERROR: can't execute statement, $DBI::errstr\n");
+		return %asyncjobs;
 	}
 	while (my $row = $sth->fetchrow_hashref)
 	{
@@ -747,6 +754,18 @@ sub get_async_jobs
 	$sth->finish();
 
 	return %asyncjobs;
+}
+
+####
+# End a subprocess with some cleanup
+####
+sub end_subprocess
+{
+	my ($ldbh, $jobid) = @_;
+
+	$ldbh->disconnect() if (defined $ldbh);
+	dprint('LOG', "end of subprocess executing job $jobid");
+	exit(0);
 }
 
 ####
@@ -781,31 +800,31 @@ sub subprocess_asynchronous_jobs
 	{
 		# Set application name to pg_dbms_job:jobid
 		if (not $ldbh->do("SET application_name TO 'pg_dbms_job:async:$jobid'")) {
-			# We don't take much more attention of this error here
 			dprint('ERROR', "can not set application_name, reason: " . $ldbh->errstr);
+			end_subprocess($ldbh, $jobid);
 		}
 
 		# Set role for the code execution
 		if ($ASYNC_JOBS{ $jobid }{ 'log_user' })
 		{
 			if (not $ldbh->do("SET ROLE $ASYNC_JOBS{ $jobid }{ 'log_user' }")) {
-				# We don't take much more attention of this error here
 				dprint('ERROR', "can not change role, reason: " . $ldbh->errstr);
+				end_subprocess($ldbh, $jobid);
 			}
 		}
 
 		# start a transaction
 		if (not $ldbh->do("BEGIN")) {
-			# We don't take much more attention of this error here
 			dprint('ERROR', "can not start a transaction, reason: " . $ldbh->errstr);
+			end_subprocess($ldbh, $jobid);
 		}
 
 		# Set search_path for the code execution
 		if ($ASYNC_JOBS{ $jobid }{ 'schema_user' })
 		{
 			if (not $ldbh->do("SET LOCAL search_path TO $ASYNC_JOBS{ $jobid }{ 'schema_user' }")) {
-				# We don't take much more attention of this error here
 				dprint('ERROR', "can not change the search_path, reason: " . $ldbh->errstr);
+				end_subprocess($ldbh, $jobid);
 			}
 		}
 
@@ -836,16 +855,16 @@ END;
 			dprint('ERROR', "job $jobid failure, reason: $errstr");
 			# Rollback the transaction
 			if (not $ldbh->do("ROLLBACK")) {
-				# We don't take much more attention of this error here
 				dprint('ERROR', "can not rollback a transaction, reason: " . $ldbh->errstr);
+				end_subprocess($ldbh, $jobid);
 			}
 		}
 		else
 		{
 			# Commit the transaction
 			if (not $ldbh->do("COMMIT")) {
-				# We don't take much more attention of this error here
 				dprint('ERROR', "can not commit a transaction, reason: " . $ldbh->errstr);
+				end_subprocess($ldbh, $jobid);
 			}
 		}
 
@@ -860,8 +879,7 @@ END;
 			print STDERR "ERROR: can't execute statement: \"$ret[0]\", $ret[1]\n";
 		}
 	}
-	dprint('LOG', "end of subprocess executing job $jobid");
-	exit(0);
+	end_subprocess($ldbh, $jobid);
 }
 
 ####
@@ -919,32 +937,36 @@ sub subprocess_scheduled_jobs
 		my $t0 = time;
 
 		# Set application name to pg_dbms_job:jobid
-		if (not $ldbh->do("SET application_name TO 'pg_dbms_job:scheduled:$jobid'")) {
-			# We don't take much more attention of this error here
+		if (not $ldbh->do("SET application_name TO 'pg_dbms_job:scheduled:$jobid'"))
+		{
 			dprint('ERROR', "can not set application_name, reason: " . $ldbh->errstr);
+			end_subprocess($ldbh, $jobid);
 		}
 
 		# Set role for the code execution
 		if ($SCHEDULED_JOBS{ $jobid }{ 'log_user' })
 		{
-			if (not $ldbh->do("SET ROLE $SCHEDULED_JOBS{ $jobid }{ 'log_user' }")) {
-				# We don't take much more attention of this error here
+			if (not $ldbh->do("SET ROLE $SCHEDULED_JOBS{ $jobid }{ 'log_user' }"))
+			{
 				dprint('ERROR', "can not change role, reason: " . $ldbh->errstr);
+				end_subprocess($ldbh, $jobid);
 			}
 		}
 
 		# start a transaction
-		if (not $ldbh->do("BEGIN")) {
-			# We don't take much more attention of this error here
+		if (not $ldbh->do("BEGIN"))
+		{
 			dprint('ERROR', "can not start a transaction, reason: " . $ldbh->errstr);
+			end_subprocess($ldbh, $jobid);
 		}
 
 		# Set search_path for the code execution
 		if ($SCHEDULED_JOBS{ $jobid }{ 'schema_user' })
 		{
-			if (not $ldbh->do("SET LOCAL search_path TO $SCHEDULED_JOBS{ $jobid }{ 'schema_user' }")) {
-				# We don't take much more attention of this error here
+			if (not $ldbh->do("SET LOCAL search_path TO $SCHEDULED_JOBS{ $jobid }{ 'schema_user' }"))
+			{
 				dprint('ERROR', "can not change the search_path, reason: " . $ldbh->errstr);
+				end_subprocess($ldbh, $jobid);
 			}
 		}
 
@@ -973,9 +995,10 @@ END;
 			$sqlstate = $ldbh->state || '';
 			dprint('ERROR', "job $jobid failure, reason: $errstr");
 			# Rollback the transaction
-			if (not $ldbh->do("ROLLBACK")) {
-				# We don't take much more attention of this error here
+			if (not $ldbh->do("ROLLBACK"))
+			{
 				dprint('ERROR', "can not rollback a transaction, reason: " . $ldbh->errstr);
+				end_subprocess($ldbh, $jobid);
 			}
 			else
 			{
@@ -990,17 +1013,18 @@ END;
 				$updt   .= " WHERE job = $jobid";
 				if (not $ldbh->do($updt))
 				{
-					# We don't take much more attention of this error here
 					dprint('ERROR', "can not update dbms_job.all_scheduled_jobs for job id $jobid, reason: " . $ldbh->errstr);
+					end_subprocess($ldbh, $jobid);
 				}
 			}
 		}
 		else
 		{
 			# Commit the transaction
-			if (not $ldbh->do("COMMIT")) {
-				# We don't take much more attention of this error here
+			if (not $ldbh->do("COMMIT"))
+			{
 				dprint('ERROR', "can not commit a transaction, reason: " . $ldbh->errstr);
+				end_subprocess($ldbh, $jobid);
 			}
 		}
 
@@ -1018,8 +1042,8 @@ END;
 		$updt   .= " WHERE job = $jobid";
 		if (not $ldbh->do($updt))
 		{
-			# We don't take much more attention of this error here
 			dprint('ERROR', "can not update dbms_job.all_scheduled_jobs for job id $jobid, reason: " . $ldbh->errstr);
+			end_subprocess($ldbh, $jobid);
 		}
 
 		# Store the execution result in table all_job_run_details
@@ -1032,8 +1056,6 @@ END;
 			print STDERR "ERROR: can't execute statement: \"$ret[0]\", $ret[1]\n";
 		}
 	}
-	dprint('LOG', "end of subprocess executing job $jobid");
-	exit(0);
+	end_subprocess($ldbh, $jobid);
 }
-
 
