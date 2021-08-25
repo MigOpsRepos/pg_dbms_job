@@ -28,7 +28,7 @@ PostgreSQL extension to schedules and manages jobs in a job queue similar to Ora
 
 This PostgreSQL extension provided full compatibility with the DBMS_JOB Oracle module.
 
-It allows to manage scheduled jobs from a job queue or to execute immediately jobs asynchronously. The `submit` stored procedure is used to store the definition of a job. A job identifier is assigned to a job along with its associated code to execute and the attributes describing when and how often the job is to be run. A job runs a SQL command, a stored procedure or any plpgsql code which has been previously stored in the database.
+It allows to manage scheduled jobs from a job queue or to execute immediately jobs asynchronously. The `submit` stored procedure is used to store the definition of a job. A job identifier is assigned to a job along with its associated code to execute and the attributes describing when and how often the job is to be run. A job runs a SQL command, any plpgsql code or a stored procedure which has been previously stored in the database.
 
 If the `submit` stored procedure is called without the `next_date` (when) and `interval` (how often) attributes, the job is executed immediately in an asynchronous process. If `interval` is NULL and that `next_date` is lower or equal to current timestamp the job is also executed immediately as an asynchronous process. In all other cases the job is to be started when appropriate but if `interval` is NULL the job is executed only once and the job is deleted.
 
@@ -38,7 +38,7 @@ This extension consist in a SQL script to create all the objects related to its 
 
 The number of jobs that can be executed at the same time is limited to 1000 by default. If this limit is reached the daemon will wait that a process ends to run a new one.
 
-The use of an external scheduler daemon instead of a background worker is a choice, being able to fork thousands of subprocesses from a background worker is not a good idea. The scheduler daemon can be run locally or on a remote server, the execution time of the jobs will always be taken on the database server where jobs are run.
+The use of an external scheduler daemon instead of a background worker is a choice, being able to fork thousands of sub-processes from a background worker is not a good idea. The scheduler daemon can be run locally or on a remote server, the execution time of the jobs will always be taken on the database server where jobs are run.
 
 The job execution is caused by a NOTIFY event received by the scheduler when a new job is submitted or when a job is modified. The notifications are polled every 0.1 second. When there is no notification the scheduler polls every `job_queue_interval` seconds (5 seconds by default) the tables where job definition are stored. This mean that at worst a job will be executed `job_queue_interval` seconds after the next execution date defined.
 
