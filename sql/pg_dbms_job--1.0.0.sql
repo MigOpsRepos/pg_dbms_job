@@ -1,7 +1,6 @@
--- complain if script is sourced in psql, rather than via CREATE EXTENSION
---\echo Use "CREATE EXTENSION pg_dbms_job" to load this file. \quit
-
-DROP SCHEMA IF EXISTS dbms_job CASCADE; 
+----
+-- Script to create the base objects of the pg_dbms_job extension
+----
 CREATE SCHEMA IF NOT EXISTS dbms_job;
 
 CREATE SEQUENCE dbms_job.jobseq;
@@ -57,7 +56,7 @@ CREATE VIEW dbms_job.all_jobs AS
     UNION
     SELECT job, log_user, NULL priv_user, schema_user, NULL last_date, NULL last_sec,
            NULL this_date, NULL this_sec, create_date next_date, NULL next_sec, NULL total_time,
-	   0 broken, NULL "interval", NULL failures, what, NULL nls_env, NULL misc_env,
+	   'f' broken, NULL "interval", NULL failures, what, NULL nls_env, NULL misc_env,
 	   0 instance FROM dbms_job.all_async_jobs;
 COMMENT ON VIEW dbms_job.all_jobs
     IS 'View registering all jobs to be run asynchronously or scheduled.';
@@ -278,7 +277,7 @@ BEGIN
     END IF;
 END;
 $$;
-COMMENT ON PROCEDURE dbms_job.run(bigint)
+COMMENT ON PROCEDURE dbms_job.run(bigint, boolean)
     IS 'Forces a specified job to run immediatly. It runs even if it is broken';
 REVOKE ALL ON PROCEDURE dbms_job.run FROM PUBLIC;
 
@@ -358,7 +357,7 @@ BEGIN
     RETURN OLD;
 END;
 $$;
-COMMENT ON FUNCTION dbms_job.job_cache_invalidate()
+COMMENT ON FUNCTION dbms_job.job_scheduled_notify()
     IS 'Notify the scheduler that the job cache must be invalidated';
 
 -- When there is a modification in the JOB table invalidate the cache
