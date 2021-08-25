@@ -1,5 +1,7 @@
 # pg_dbms_job
 
+PostgreSQL extension to schedules and manages jobs in the job queue similar to Oracle DBMS_JOB package.
+
 * [Description](#description)
 * [Installation](#installation)
 * [Manage the extension](#manage-the-extension)
@@ -24,15 +26,15 @@
 
 ## [Description](#description)
 
-This PostgreSQL extension provided full compatibility with the deprecated DBMS_JOB Oracle module.
+This PostgreSQL extension provided full compatibility with the DBMS_JOB Oracle module.
 
-It allows the creation, scheduling, and managing of jobs. A job runs a SQL command, a stored procedure or any plpgsql code which has been previously stored in the database. The `submit` stored procedure is used to create and store the definition of a job. A job identifier is assigned to a job along with its associated code to execute and the attributes describing when and how often the job is to be run.
+It allows to manage scheduled jobs from a job queue or to execute immediately jobs asynchronously. The `submit` stored procedure is used to store the definition of a job. A job identifier is assigned to a job along with its associated code to execute and the attributes describing when and how often the job is to be run. A job runs a SQL command, a stored procedure or any plpgsql code which has been previously stored in the database.
 
-If the `submit` stored procedure is called without the `next_date` (when) and `interval` (how often) attributes, the job is executed immediately in an asynchronous process. If `interval` is NULL and that `next_date` is lower or equal to current timestamp the job is also executed immediately asynchronously. In all other cases the job is be started when appropriate but if `interval` is NULL the job is executed only once and the job is deleted.
+If the `submit` stored procedure is called without the `next_date` (when) and `interval` (how often) attributes, the job is executed immediately in an asynchronous process. If `interval` is NULL and that `next_date` is lower or equal to current timestamp the job is also executed immediately as an asynchronous process. In all other cases the job is to be started when appropriate but if `interval` is NULL the job is executed only once and the job is deleted.
 
 If a scheduled job completes successfully, then its new execution date is placed in `next_date`. The new date is calculated by executing the statement `SELECT interval INTO next_date`. The `interval` parameter must evaluate to a time in the future.
 
-This extension consist in a SQL script to create all the objects related to its operation and a daemon that must be run attached to the database where jobs are defined. The daemon is responsible to execute the queued asynchronous jobs and the scheduled ones. It should be running on the same host or any other host, the schedule time is taken on the database host.
+This extension consist in a SQL script to create all the objects related to its operation and a daemon that must be run attached to the database where jobs are defined. The daemon is responsible to execute the queued asynchronous jobs and the scheduled ones. It can be run on the same host of the database where the jobs are defined or on any other host, the schedule time is taken from the database host not where the daemon is running.
 
 The number of job that can be executed at the same time is limited to 1000 by default. If this limit is reached the daemon will wait that a process ends to run a new one.
 
