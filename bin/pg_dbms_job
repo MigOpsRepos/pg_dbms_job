@@ -1,10 +1,8 @@
 #!/usr/bin/perl
 #-------------------------------------------------------------------------
-# pg_dbms_job.pl
+# pg_dbms_job
 #
-#	Perl daemon to emulate Oracle DBMS_JOB for PostgreSQL.
-#
-# - this host and the remote one must have the same timestamp ???
+#	Perl scheduler daemon to emulate Oracle DBMS_JOB for PostgreSQL.
 #
 # Author: Gilles Darold <gilles@darold.net>
 # Licence: PostgreSQL
@@ -225,7 +223,7 @@ if (!$SINGLE)
 	exit 0 if ($pid);
 	die "FATAL: Couldn't fork: $!" unless defined($pid);
 	POSIX::setsid() or die "Can't detach: \$!";
-	&dprint('LOG', "Detach from terminal with pid: $$");
+	&dprint('DEBUG', "Detach from terminal with pid: $$");
 	open(STDIN , '<', "/dev/null");
 	open(STDOUT, '>', "/dev/null");
 }
@@ -287,7 +285,7 @@ while (!$fini)
 		while (my $notify = $dbh->pg_notifies)
 		{
 			my ($topic, $pid, $payload) = @$notify;
-			dprint('LOG', "Received notification: ($topic, $pid, $payload)");
+			dprint('DEBUG', "Received notification: ($topic, $pid, $payload)");
 			$async_count++ if ($topic eq 'dbms_job_async_notify');
 			$scheduled_count++ if ($topic eq 'dbms_job_scheduled_notify');
 		}
@@ -348,6 +346,7 @@ while (!$fini)
 	{
 		# If we have forked too much processes wait one second until a process die
 		while (scalar keys %RUNNING_PIDS >= $job_queue_processes) {
+			dprint('WARNING', "max job queue size is reached ($job_queue_processes) waiting the end of an other job");
 			sleep(1);
 		}
 
@@ -365,6 +364,7 @@ while (!$fini)
 	{
 		# If we have forked too much processes wait one second until a process die
 		while (scalar keys %RUNNING_PIDS >= $job_queue_processes) {
+			dprint('WARNING', "max job queue size is reached ($job_queue_processes) waiting the end of an other job");
 			sleep(1);
 		}
 
@@ -654,7 +654,7 @@ sub connect_db
 ####
 sub get_scheduled_jobs
 {
-	dprint('LOG', 'Get scheduled jobs to run');
+	dprint('DEBUG', 'Get scheduled jobs to run');
 
 	my %alljobs = ();
 
@@ -688,7 +688,7 @@ sub get_scheduled_jobs
 	}
 	$sth->finish();
 
-	dprint('LOG', "Found " . (scalar keys %alljobs) . " scheduled jobs to run");
+	dprint('DEBUG', "Found " . (scalar keys %alljobs) . " scheduled jobs to run");
 
 	return %alljobs;
 }
@@ -753,6 +753,8 @@ sub get_async_jobs
 	}
 	$sth->finish();
 
+	dprint('DEBUG', "Found " . (scalar keys %asyncjobs) . " asynchronous jobs to run");
+
 	return %asyncjobs;
 }
 
@@ -784,9 +786,10 @@ sub subprocess_asynchronous_jobs
 	$SIG{TERM} = 'IGNORE';
 	$SIG{HUP}  = 'IGNORE';
 
+	dprint('LOG', "executing job $jobid");
+
 	if ($CONFIG{ 'debug' })
 	{
-		dprint('LOG', "executing job $jobid");
 		foreach my $k (sort { $a <=> $b } keys %{ $ASYNC_JOBS{ $jobid } })
 		{
 			dprint('DEBUG', "job $jobid with parameter $k: $ASYNC_JOBS{ $jobid }{ $k }");
@@ -844,7 +847,7 @@ BEGIN
 END;
 \$\$;
 };
-		dprint('LOG', "executing code of job id $jobid: $ASYNC_JOBS{ $jobid }{ 'what' }");
+		dprint('DEBUG', "executing code of job id $jobid: $ASYNC_JOBS{ $jobid }{ 'what' }");
 		# Execute the code of the WHAT column
 		if (not $ldbh->do($codetoexec))
 		{
@@ -920,9 +923,9 @@ sub subprocess_scheduled_jobs
 	$SIG{TERM} = 'IGNORE';
 	$SIG{HUP}  = 'IGNORE';
 
+	dprint('LOG', "executing job $jobid");
 	if ($CONFIG{ 'debug' })
 	{
-		dprint('LOG', "executing job $jobid");
 		foreach my $k (sort { $a <=> $b } keys %{ $SCHEDULED_JOBS{ $jobid } })
 		{
 			dprint('DEBUG', "job $jobid with parameter $k: $SCHEDULED_JOBS{ $jobid }{ $k }");
@@ -985,7 +988,7 @@ BEGIN
 END;
 \$\$;
 };
-		dprint('LOG', "executing code of job id $jobid: $SCHEDULED_JOBS{ $jobid }{ 'what' }");
+		dprint('DEBUG', "executing code of job id $jobid: $SCHEDULED_JOBS{ $jobid }{ 'what' }");
 		# Execute the code of the WHAT column
 		if (not $ldbh->do($codetoexec))
 		{

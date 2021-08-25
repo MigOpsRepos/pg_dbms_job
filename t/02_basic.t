@@ -1,4 +1,4 @@
-use Test::Simple tests => 15;
+use Test::Simple tests => 14;
 
 # Test that the ademon can be started and stopped
 # as well as default privileges on objects
@@ -24,12 +24,11 @@ ok( $? == 0, "Create regression test user: regress_dbms_job_user");
 $ret = `psql -c "CREATE DATABASE regress_dbms_job OWNER regress_dbms_job_dba"`;
 ok( $? == 0, "Create test regression database: regress_dbms_job");
 
-# Start the scheduler when the pg_dbms_job extension doesn't exists
+# Start the scheduler when the pg_dbms_job extension doesn't exists, it must stop
 $ret = `perl bin/pg_dbms_job -c test/regress_dbms_job.conf -s >/dev/null 2>&1`;
-ok( $? != 0 , "Run without the extension");
 $ret = `ls /tmp/regress_dbms_job.* | wc -l`;
 chomp($ret);
-ok( $ret eq "1", "No pid file");
+ok( $ret eq "1", "Scheduler stopped, no pid file");
 
 # Create the schema and object of the pg_dbms_job extension
 $ret = `psql -d regress_dbms_job -f sql/pg_dbms_job--1.0.0.sql > /dev/null 2>&1`;
