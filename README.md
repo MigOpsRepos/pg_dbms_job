@@ -28,7 +28,7 @@ PostgreSQL extension to schedules and manages jobs in a job queue similar to Ora
 
 This PostgreSQL extension provided full compatibility with the DBMS_JOB Oracle module.
 
-It allows to manage scheduled jobs from a job queue or to execute immediately jobs asynchronously. The `submit` stored procedure is used to store the definition of a job. A job identifier is assigned to a job along with its associated code to execute and the attributes describing when and how often the job is to be run. A job runs a SQL command, any plpgsql code or a stored procedure which has been previously stored in the database.
+It allows to manage scheduled jobs from a job queue or to execute immediately jobs asynchronously. The `submit` stored procedure is used to store the definition of a job. A job definition consist on a code to execute, the next date of execution and how often the job is to be run. A job runs a SQL command, plpgsql code or a stored procedure which has been previously stored in the database.
 
 If the `submit` stored procedure is called without the `next_date` (when) and `interval` (how often) attributes, the job is executed immediately in an asynchronous process. If `interval` is NULL and that `next_date` is lower or equal to current timestamp the job is also executed immediately as an asynchronous process. In all other cases the job is to be started when appropriate but if `interval` is NULL the job is executed only once and the job is deleted.
 
