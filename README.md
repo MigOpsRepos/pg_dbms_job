@@ -1,14 +1,14 @@
 # pg_dbms_job
 
-* [Description](#desription)
+* [Description](#description)
 * [Installation](#installation)
 * [Manage the extension](#manage-the-extension)
 * [Running the scheduler](#running-the-scheduler)
-  - [Configuration](#configuration)
-* [Jobs definition](#jobs-definition]
+* [Configuration](#configuration)
+* [Jobs definition](#jobs-definition)
   - [Scheduled jobs](#scheduled-jobs)
   - [Asynchronous jobs](#asynchronous-jobs)
-* [View DMBS_JOB.ALL_JOBS](#view-dbms_job.all_jobs)
+* [View DBMS_JOB.ALL_JOBS](#view-dbms_job.all_jobs)
 * [Jobs execution history](#jobs-execution-history)
 * [Procedures](#procedures)
   - [BROKEN](#broken)
@@ -22,7 +22,7 @@
 * [Authors](#authors)
 * [License](#license)
 
-## [Description](#desription)
+## [Description](#description)
 
 This PostgreSQL extension provided full compatibility with the deprecated DBMS_JOB Oracle module.
 
@@ -106,18 +106,18 @@ options:
   -s, --single        do not detach and run in single loop mode and exit.
 ```
 
-### [Configuration](#configuration)
+## [Configuration](#configuration)
 
 The format of the configuration file is the same as `postgresql.conf`.
 
-#### General
+### General
 
 - `debug`: debug mode. Default 0, disabled.
 - `pidfile`: path to pid file. Default to `/tmp/pg_dbms_job.pid`.
 - `logfile`: path to log file. Default `/tmp/pg_dbms_job.log`.
 - `job_queue_interval`: poll interval of the jobs queue. Default 5 seconds.
 
-#### Database
+### Database
 
 - `host`: ip adresse or hostname where the PostgreSQL cluster is running.
 - `port`: port where the PostgreSQL cluster is listening.
@@ -125,7 +125,7 @@ The format of the configuration file is the same as `postgresql.conf`.
 - `user`: username used to connect to the database, it must be a superuser role.
 - `passwd`: password for this role.
 
-#### Example
+### Example
 ```
 #-------------
 #  General
@@ -148,7 +148,7 @@ user=gilles
 passwd=gilles
 ```
 
-## [Jobs definition](#jobs-definition]
+## [Jobs definition](#jobs-definition)
 
 ### [Scheduled jobs](#scheduled-jobs)
 
@@ -191,7 +191,7 @@ CREATE TABLE dbms_job.all_async_jobs
         what text NOT NULL -- body of the anonymous pl/sql block that the job executes
 );
 ```
-## [View DMBS_JOB.ALL_JOBS](#view-dbms_job.all_jobs)
+## [View DBMS_JOB.ALL_JOBS](#view-dbms_job.all_jobs)
 
 All jobs that have to be executed can be listed from the view `dbms_job.all_jobs`, this is the equivalent of the Oracle table DBMS_JOB.ALL_JOBS. This view reports all jobs to be run by execution a union between the two tables described in previous chapters.
 
