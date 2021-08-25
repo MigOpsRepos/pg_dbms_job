@@ -1,6 +1,6 @@
 # pg_dbms_job
 
-PostgreSQL extension to schedules and manages jobs in the job queue similar to Oracle DBMS_JOB package.
+PostgreSQL extension to schedules and manages jobs in a job queue similar to Oracle DBMS_JOB package.
 
 * [Description](#description)
 * [Installation](#installation)
@@ -36,9 +36,9 @@ If a scheduled job completes successfully, then its new execution date is placed
 
 This extension consist in a SQL script to create all the objects related to its operation and a daemon that must be run attached to the database where jobs are defined. The daemon is responsible to execute the queued asynchronous jobs and the scheduled ones. It can be run on the same host of the database where the jobs are defined or on any other host, the schedule time is taken from the database host not where the daemon is running.
 
-The number of job that can be executed at the same time is limited to 1000 by default. If this limit is reached the daemon will wait that a process ends to run a new one.
+The number of jobs that can be executed at the same time is limited to 1000 by default. If this limit is reached the daemon will wait that a process ends to run a new one.
 
-The use of an external scheduler daemon instead of a background worker is a choice, being able to fork thousands of subprocesses from a background worker is not a good idea. The scheduler daemon can be run locally or on a remote server, the execution time of the jobs will always be taken on the database server.
+The use of an external scheduler daemon instead of a background worker is a choice, being able to fork thousands of subprocesses from a background worker is not a good idea. The scheduler daemon can be run locally or on a remote server, the execution time of the jobs will always be taken on the database server where jobs are run.
 
 The job execution is caused by a NOTIFY event received by the scheduler when a new job is submitted or when a job is modified. The notifications are polled every 0.1 second. When there is no notification the scheduler polls every `job_queue_interval` seconds (5 seconds by default) the tables where job definition are stored. This mean that at worst a job will be executed `job_queue_interval` seconds after the next execution date defined.
 
