@@ -702,7 +702,7 @@ sub get_async_jobs
 	my $limit = '';
 
 	# Get all jobs to be executed asap from table ALL_ASYNC_JOBS
-	my $query = "DELETE FROM dbms_job.all_async_jobs RETURNING *";
+	my $query = "SELECT * FROM dbms_job.all_async_jobs";
 	my $sth = $dbh->prepare($query);
 	if (!defined $sth)
 	{
@@ -729,8 +729,8 @@ sub get_async_jobs
 	# where the next_date value is lower or equal to current timestamp
 	# as they also need to be executed immediately and removed from the
 	# dbms_job.all_scheduled_jobs table as they are no more used.
-	$query  = "DELETE FROM dbms_job.all_scheduled_jobs WHERE interval IS NULL";
-	$query .=  " AND next_date <= current_timestamp RETURNING *";
+	$query  = "SELECT * FROM dbms_job.all_scheduled_jobs WHERE interval IS NULL";
+	$query .=  " AND next_date <= current_timestamp";
 	$sth = $dbh->prepare($query);
 	if (!defined $sth)
 	{
@@ -801,13 +801,54 @@ sub subprocess_asynchronous_jobs
 
 	if (defined $ldbh)
 	{
+
+		####
+		# Start by deleting the job from the queue to
+		# avoid executing it again in case of failure.
+		####
+		dprint('DEBUG', "Deleting asynchronous job $jobid from queue");
+
+		my $query  = "DELETE FROM dbms_job.all_async_jobs WHERE job = $jobid RETURNING job";
+		my $sth = $ldbh->prepare($query);
+		if (!defined $sth) {
+			dprint('ERROR', "can't prepare statement, $DBI::errstr");
+			end_subprocess($ldbh, $jobid);
+		}
+		$sth->execute;
+		if ($sth->err) {
+			dprint('ERROR', "can't execute statement, $DBI::errstr");
+			end_subprocess($ldbh, $jobid);
+		}
+		my $row = $sth->fetchrow;
+		$sth->finish();
+
+		# If no deleted job was returned, this was a scheduled job without interval
+		if (not defined $row)
+		{
+			$query  = "DELETE FROM dbms_job.all_scheduled_jobs WHERE job = $jobid";
+			my $sth = $ldbh->prepare($query);
+			if (!defined $sth) {
+				dprint('ERROR', "can't prepare statement, $DBI::errstr");
+				end_subprocess($ldbh, $jobid);
+			}
+			$sth->execute;
+			if ($sth->err) {
+				dprint('ERROR', "can't execute statement, $DBI::errstr");
+				end_subprocess($ldbh, $jobid);
+			}
+		}
+
+		####
 		# Set application name to pg_dbms_job:jobid
+		####
 		if (not $ldbh->do("SET application_name TO 'pg_dbms_job:async:$jobid'")) {
 			dprint('ERROR', "can not set application_name, reason: " . $ldbh->errstr);
 			end_subprocess($ldbh, $jobid);
 		}
 
+		####
 		# Set role for the code execution
+		####
 		if ($ASYNC_JOBS{ $jobid }{ 'log_user' })
 		{
 			if (not $ldbh->do("SET ROLE $ASYNC_JOBS{ $jobid }{ 'log_user' }")) {
@@ -816,13 +857,17 @@ sub subprocess_asynchronous_jobs
 			}
 		}
 
+		####
 		# start a transaction
+		####
 		if (not $ldbh->do("BEGIN")) {
 			dprint('ERROR', "can not start a transaction, reason: " . $ldbh->errstr);
 			end_subprocess($ldbh, $jobid);
 		}
 
+		####
 		# Set search_path for the code execution
+		####
 		if ($ASYNC_JOBS{ $jobid }{ 'schema_user' })
 		{
 			if (not $ldbh->do("SET LOCAL search_path TO $ASYNC_JOBS{ $jobid }{ 'schema_user' }")) {
@@ -831,6 +876,9 @@ sub subprocess_asynchronous_jobs
 			}
 		}
 
+		####
+		# Execute the code of the WHAT column
+		####
 		my $success = 1;
 		my $errstr = '';
 		my $status = '';
@@ -848,7 +896,6 @@ END;
 \$\$;
 };
 		dprint('DEBUG', "executing code of job id $jobid: $ASYNC_JOBS{ $jobid }{ 'what' }");
-		# Execute the code of the WHAT column
 		if (not $ldbh->do($codetoexec))
 		{
 			$success = 0;
@@ -882,6 +929,7 @@ END;
 			print STDERR "ERROR: can't execute statement: \"$ret[0]\", $ret[1]\n";
 		}
 	}
+
 	end_subprocess($ldbh, $jobid);
 }
 

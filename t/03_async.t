@@ -1,4 +1,4 @@
-use Test::Simple tests => 6;
+use Test::Simple tests => 7;
 
 # Test asynchronous jobs
 
@@ -31,6 +31,11 @@ ok( $ret eq "2", "Daemon pg_dbms_job and subprocess are still running: $ret");
 
 # Be sure that the job have been processed
 sleep(3);
+
+# Verify that the job have been removed from the queue
+my $ret = `psql -d regress_dbms_job -Atc "SELECT count(*) FROM dbms_job.all_async_jobs;"`;
+chomp($ret);
+ok( $? == 0 && $ret eq "0", "Asynchronous job have been removed");
 
 # Look if the job have been registered in the history table
 my $ret = `psql -d regress_dbms_job -Atc "SET ROLE regress_dbms_job_user;SELECT count(*) FROM dbms_job.all_scheduler_job_run_details;"`;
