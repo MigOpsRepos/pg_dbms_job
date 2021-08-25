@@ -8,7 +8,7 @@
 * [Jobs definition](#jobs-definition)
   - [Scheduled jobs](#scheduled-jobs)
   - [Asynchronous jobs](#asynchronous-jobs)
-* [View DBMS_JOB.ALL_JOBS](#view-dbms_job_all_jobs)
+* [View ALL_JOBS](#view-all_jobs)
 * [Jobs execution history](#jobs-execution-history)
 * [Procedures](#procedures)
   - [BROKEN](#broken)
@@ -191,7 +191,7 @@ CREATE TABLE dbms_job.all_async_jobs
         what text NOT NULL -- body of the anonymous pl/sql block that the job executes
 );
 ```
-## [View DBMS_JOB.ALL_JOBS](#view-dbms_job_all_jobs)
+## [View ALL_JOBS](#view-all_jobs)
 
 All jobs that have to be executed can be listed from the view `dbms_job.all_jobs`, this is the equivalent of the Oracle table DBMS_JOB.ALL_JOBS. This view reports all jobs to be run by execution a union between the two tables described in previous chapters.
 
