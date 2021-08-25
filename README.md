@@ -1,26 +1,48 @@
 # pg_dbms_job
 
-## Description
+* [Description](#desription)
+* [Installation](#installation)
+* [Manage the extension](#manage-the-extension)
+* [Running the scheduler](#running-the-scheduler)
+  - [Configuration](#configuration)
+* [Jobs definition](#jobs-definition]
+  - [Scheduled jobs](#scheduled-jobs)
+  - [Asynchronous jobs](#asynchronous-jobs)
+* [View DMBS_JOB.ALL_JOBS](#view-dbms_job.all_jobs)
+* [Jobs execution history](#jobs-execution-history)
+* [Procedures](#procedures)
+  - [BROKEN](#broken)
+  - [CHANGE](#change)
+  - [INTERVAL](#interval)
+  - [NEXT_DATE](#next_date)
+  - [REMOVE](#remove)
+  - [RUN](#run)
+  - [SUBMIT](#submit)
+  - [WHAT](#what)
+* [Authors](#authors)
+* [License](#license)
 
-This PostgreSQL extension provided full compatibility with the DBMS_JOB Oracle module.
+## [Description](#desription)
+
+This PostgreSQL extension provided full compatibility with the deprecated DBMS_JOB Oracle module.
 
 It allows the creation, scheduling, and managing of jobs. A job runs a SQL command, a stored procedure or any plpgsql code which has been previously stored in the database. The `submit` stored procedure is used to create and store the definition of a job. A job identifier is assigned to a job along with its associated code to execute and the attributes describing when and how often the job is to be run.
 
-If the `submit` stored procedure is called without the `next_date` (when) and `interval` (how often) attributes, the job is executed immediatly in an asynchronous process. If `interval` is NULL and that `next_date` is lower or equal to current timestamp the job is also executed immediatly in an asynchronous process. If the 'when' and 'how often' attributes are set the job will be started when appropriate.
+If the `submit` stored procedure is called without the `next_date` (when) and `interval` (how often) attributes, the job is executed immediately in an asynchronous process. If `interval` is NULL and that `next_date` is lower or equal to current timestamp the job is also executed immediately asynchronously. In all other cases the job is be started when appropriate but if `interval` is NULL the job is executed only once and the job is deleted.
 
-If a scheduled job completes successfully, then its new execution date is placed in `next_date`. The nuew date is calculated by executing the statement `SELECT interval INTO next_date`. The `interval` parameter must evaluate to a time in the future.
+If a scheduled job completes successfully, then its new execution date is placed in `next_date`. The new date is calculated by executing the statement `SELECT interval INTO next_date`. The `interval` parameter must evaluate to a time in the future.
 
-This extension consist in a SQL script to create all the objects related to its operation and a daemon that must be run attached to the database where job are defined. The daemon is responsible to execute the queued asynchronous jobs and the scheduled ones. It should be running on the same host or both host should have the same time synchronization source.
+This extension consist in a SQL script to create all the objects related to its operation and a daemon that must be run attached to the database where jobs are defined. The daemon is responsible to execute the queued asynchronous jobs and the scheduled ones. It should be running on the same host or any other host, the schedule time is taken on the database host.
 
-The number of job that can be executed at the same time is limited to 1000.
+The number of job that can be executed at the same time is limited to 1000 by default. If this limit is reached the daemon will wait that a process ends to run a new one.
 
-The use of an external scheduler daemon instead of a background worker is a choice, being able to fork thousands of subprocess from a background worker is possibly not a good idea. The scheduler daemon can be run locally or on a remote server, the execution time of the jobs will always be taken on the database server.
+The use of an external scheduler daemon instead of a background worker is a choice, being able to fork thousands of subprocesses from a background worker is not a good idea. The scheduler daemon can be run locally or on a remote server, the execution time of the jobs will always be taken on the database server.
 
 The job execution is caused by a NOTIFY event received by the scheduler when a new job is submitted or when a job is modified. The notifications are polled every 0.1 second. When there is no notification the scheduler polls every `job_queue_interval` seconds (5 seconds by default) the tables where job definition are stored. This mean that at worst a job will be executed `job_queue_interval` seconds after the next execution date defined.
 
-## Installation
+## [Installation](#installation)
 
-There is no special requirement to run this extension but your PostgreSQL version must support extensions (>= 9.1) and Perl must be available as well as the DBI and DBD::Pg Perl modules. If your distribution doesn't include these Perl modules you can always install them using CPAN:
+There is no special requirement to run this extension but your PostgreSQL version must support extensions (>= 9.1) and Perl must be available as well as the DBI, DBD::Pg and Time::Hires Perl modules. If your distribution doesn't include these Perl modules you can always install them using CPAN:
 
     perl -MCPAN -e 'install DBI'
     perl -MCPAN -e 'install DBD::Pg'
@@ -31,7 +53,7 @@ or in Debian like distribution use:
 
 and on RPM based system:
 
-    yum install perl-DBI perl-DBD-Pg
+    yum install perl-DBI perl-DBD-Pg perl-Time-HiRes
 
 To install the extension execute
 
@@ -42,7 +64,7 @@ Test of the extension can be done using:
 
     make installcheck
 
-## Create/upgrade the extension
+## [Manage the extension](#manage-the-extension)
 
 Each database that needs to use `pg_dbms_job` must creates the extension:
 
@@ -58,9 +80,9 @@ If you doesn't have the privileges to create an extension you can just import th
 
 This is especially useful for database in DBaas cloud services. To upgrade just import the extension upgrade files using psql.
 
-A dedicated scheduler per database using the extentionmust be started.
+A dedicated scheduler per database using the extension must be started.
 
-## Running the scheduler
+## [Running the scheduler](#running-the-scheduler)
 
 The scheduler is a Perl program that runs in background it can be executed by any system user as follow:
 
@@ -84,23 +106,23 @@ options:
   -s, --single        do not detach and run in single loop mode and exit.
 ```
 
-### Configuration
+### [Configuration](#configuration)
 
-The format of the configuration file is the same as postgresql.conf.
+The format of the configuration file is the same as `postgresql.conf`.
 
 #### General
 
 - `debug`: debug mode. Default 0, disabled.
 - `pidfile`: path to pid file. Default to `/tmp/pg_dbms_job.pid`.
 - `logfile`: path to log file. Default `/tmp/pg_dbms_job.log`.
-- `job_queue_interval`: poll interval of the jobs queuei. Default 5 seconds.
+- `job_queue_interval`: poll interval of the jobs queue. Default 5 seconds.
 
 #### Database
 
 - `host`: ip adresse or hostname where the PostgreSQL cluster is running.
 - `port`: port where the PostgreSQL cluster is listening.
 - `database`: name of the database where to connect.
-- `user`: username used to connec to the database, it must be a superuser role.
+- `user`: username used to connect to the database, it must be a superuser role.
 - `passwd`: password for this role.
 
 #### Example
@@ -126,9 +148,9 @@ user=gilles
 passwd=gilles
 ```
 
-## Jobs definition
+## [Jobs definition](#jobs-definition]
 
-### Scheduled jobs
+### [Scheduled jobs](#scheduled-jobs)
 
 Jobs to run are stored in table `dbms_job.all_scheduled_jobs` which is the same structure as the one in Oracle. Some columns are just here for compatibility but are not used. They are executed when current timestamp of the scheduler daemon is upper or equal to the date defined in the `next_date` attribute.
 
@@ -156,7 +178,7 @@ CREATE TABLE dbms_job.all_scheduled_jobs
 );
 ```
 
-### Asynchronous job
+### [Asynchronous jobs](#asynchronous-jobs)
 
 Job submitted without execution date are jobs that need to be executed asynchronously as soon as possible after being created. They are stored in the queue (FIFO) table `dbms_job.all_async_jobs`.
 ```
@@ -169,9 +191,9 @@ CREATE TABLE dbms_job.all_async_jobs
         what text NOT NULL -- body of the anonymous pl/sql block that the job executes
 );
 ```
-## View DMBS_JOB.ALL_JOBS
+## [View DMBS_JOB.ALL_JOBS](#view-dbms_job.all_jobs)
 
-All jobs that have to be executed can be listed from the view `dbms_job.all_jobs`, this is the equivalent of the Oracle table DBMS_JOB.ALL_JOBS. THis view reports all jobs to be run by execution a union between the two tables described in previous chapters.
+All jobs that have to be executed can be listed from the view `dbms_job.all_jobs`, this is the equivalent of the Oracle table DBMS_JOB.ALL_JOBS. This view reports all jobs to be run by execution a union between the two tables described in previous chapters.
 
 ## Security
 
@@ -187,13 +209,13 @@ GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA dbms_job TO <role>;
 GRANT EXECUTE ON ALL PROCEDURES IN SCHEMA dbms_job TO <role>;
 ```
 
-A job will be taken in account by the scheduler only when the transaction where it has been created is committed. It is transactionnal so no risk that it will be executed if the transaction is aborted.
+A job will be taken in account by the scheduler only when the transaction where it has been created is committed. It is transactional so no risk that it will be executed if the transaction is aborted.
 
 When starting or when it is reloaded the pg_dbms_job daemon first checks that another daemon is not already attached to the same database. If this is the case it will refuse to continue. This is a double verification, the first one is on an existing pid file and the second is done by looking at pg_stat_activity to see if a `pg_dbms_job:main` process already exists.
 
-## Job history
+## [Jobs execution history](#jobs-execution-history)
 
-Oracle DBMS_JOB doesn't provide a log history. This feature is available in DBMS_SCHEDULER and the past activity of nthe scheduler can be seen in table ALL_SCHEDULER_JOB_RUN_DETAILS. This extension stores all PG_DBMS_JOB activity in a similar table named `dbms_job.all_scheduler_job_run_details`.
+Oracle DBMS_JOB doesn't provide a log history. This feature is available in DBMS_SCHEDULER and the past activity of the scheduler can be seen in table ALL_SCHEDULER_JOB_RUN_DETAILS. This extension stores all PG_DBMS_JOB activity in a similar table named `dbms_job.all_scheduler_job_run_details`.
 
 ```
 CREATE TABLE dbms_job.all_scheduler_job_run_details
@@ -216,9 +238,9 @@ CREATE TABLE dbms_job.all_scheduler_job_run_details
 );
 ```
 
-## Procedures
+## [Procedures](#procedures)
 
-### BROKEN
+### [BROKEN](#broken)
 
 Disables or suspend job execution. This procedure sets the broken flag. Broken jobs are never run.
 
@@ -243,7 +265,7 @@ Example:
 	CALL pg_dbms_job.broken(12345, true);
 	COMMIT;
 
-### CHANGE
+### [CHANGE](#change)
 
 Alters any of the user-definable parameters associated with a job. Any value you do not want to change can be specified as NULL.
 
@@ -277,7 +299,7 @@ Change the interval of execution of job 12345 to run every 3 days
 	CALL pg_dbms_job.change(12345, null, null, 'current_timestamp + ''3 days''::interval');
 	COMMIT;
 
-### INTERVAL
+### [INTERVAL](#interval)
 
 Alters the interval between executions for a specified job
 
@@ -324,7 +346,7 @@ Example:
 	CALL pg_dbms_job.interval(12345, 'current_timestamp + '10 seconds'::interval);
 	COMMIT;
 
-### NEXT_DATE
+### [NEXT_DATE](#next_date)
 
 Alters the next execution time for a specified job
 
@@ -345,7 +367,7 @@ Example:
 	CALL pg_dbms_job.next_date(12345, current_timestamp + '1 day'::interval);
 	COMMIT;
 
-### REMOVE
+### [REMOVE](#remove)
 
 Removes specified job from the job queue. You can only remove jobs that you own. If this is run while the job is executing, it will not be interrupted but will not be run again.
 
@@ -364,13 +386,13 @@ Example:
 	CALL pg_dbms_job.remove(12345);
 	COMMIT;
 
-### RUN
+### [RUN](#run)
 
 Forces a specified job to run. This procedure runs the job now. It runs even if it is broken. If it was broken and it runs successfully, the job is updated to indicates that it is no longer broken and goes back to running on its schedule.
 
 Running the job recomputes next_date based on the time you run the procedure.
 
-When runs in foreground there is no logging to the jobs history table but information on the all_scheduled_jobs table atre updated in case of error or success. In case of error the exception is raise to the client.
+When runs in foreground there is no logging to the jobs history table but information on the dbms_job.all_scheduled_jobs table are updated in case of error or success. In case of error the exception is raise to the client.
 
 Syntax:
 
@@ -387,7 +409,7 @@ Example:
 	CALL pg_dbms_job.run(12345, false);
 	COMMIT;
 
-### SUBMIT
+### [SUBMIT](#submit)
 
 Submits a new job to the job queue. It chooses the job from the sequence sys.jobseq.
 
@@ -439,7 +461,7 @@ This submits a new job to the job queue. The job calls ANALYZE to generate optim
 	END;
 	COMMIT;
 
-### WHAT
+### [WHAT](#what)
 
 Alters the job description for a specified job. This procedure changes what an existing job does, and replaces its environment.
 
@@ -459,3 +481,16 @@ Example:
 	BEGIN;
 	CALL dbms_job.what('ANALYZE public.accounts.');
 	COMMIT;
+
+## [Authors](#authors)
+
+- Gilles Darold
+
+## [License](#license)
+
+This extension is free software distributed under the PostgreSQL
+License.
+
+    Copyright (c) 2021 MigOps Inc.
+
+                                  
