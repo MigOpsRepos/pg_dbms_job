@@ -1,3 +1,7 @@
+Wed Aug 25 2021: Version 1.0.1
+
+  - Fix CREATE EXTENSION that was broken.
+
 Wed Aug 25 2021: Version 1.0.0
 
   - Initial release
