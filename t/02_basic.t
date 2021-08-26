@@ -31,7 +31,9 @@ chomp($ret);
 ok( $ret eq "1", "Scheduler stopped, no pid file");
 
 # Create the schema and object of the pg_dbms_job extension
-$ret = `psql -d regress_dbms_job -f sql/pg_dbms_job--1.0.0.sql > /dev/null 2>&1`;
+my $ver = `grep default_version pg_dbms_job.control | sed -E "s/.*'(.*)'/\\1/"`;
+chomp($ver);
+$ret = `psql -d regress_dbms_job -f sql/pg_dbms_job--$ver.sql > /dev/null 2>&1`;
 ok( $? == 0, "Import pg_dbms_job schema");
 
 # Start the scheduler daemon and verify that the pid and log files are created
