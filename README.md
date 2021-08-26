@@ -21,6 +21,7 @@ PostgreSQL extension to schedules and manages jobs in a job queue similar to Ora
   - [RUN](#run)
   - [SUBMIT](#submit)
   - [WHAT](#what)
+* [Limitations](#limitations)
 * [Authors](#authors)
 * [License](#license)
 
@@ -109,6 +110,30 @@ options:
   -s, --single        do not detach and run in single loop mode and exit.
 ```
 
+To stop gracefully the scheduler daemon after all running jobs are terminated, you can run the same command but with the `-k` option:
+```
+pg_dbms_job -c /etc/pg_dbms_job/mydb-dbms_job.conf -k
+```
+you can also send the TERM signal to the main process:
+```
+$ ps auwx | grep "pg_dbms_job:main" | grep -g grep
+gilles     14754  0.0  0.0  39636 17492 ?        Ss   10:15   0:00 pg_dbms_job:main
+
+$ kill -15 14754
+```
+
+To force the scheduler to stop immedialely interrupting the running jobs use the `-m` option:
+```
+pg_dbms_job -c /etc/pg_dbms_job/mydb-dbms_job.conf -m
+```
+or send the INT signal:
+```
+$ ps auwx | grep "pg_dbms_job:main" | grep -g grep
+gilles     14754  0.0  0.0  39636 17492 ?        Ss   10:15   0:00 pg_dbms_job:main
+
+$ kill -2 14754
+```
+
 ## [Configuration](#configuration)
 
 The format of the configuration file is the same as `postgresql.conf`.
@@ -149,6 +174,18 @@ port=5432
 database=dbms_job
 user=gilles
 passwd=gilles
+```
+
+To force the scheduler to reread the configuration file after changes you can use the `-r` option:
+```
+pg_dbms_job -c /etc/pg_dbms_job/mydb-dbms_job.conf -r
+```
+or send the HUP signal:
+```
+$ ps auwx | grep "pg_dbms_job:main" | grep -g grep
+gilles     14758  0.0  0.0  39636 17492 ?        Ss   10:17   0:00 pg_dbms_job:main
+
+$ kill -1 14758
 ```
 
 ## [Jobs definition](#jobs-definition)
@@ -484,6 +521,21 @@ Example:
 	BEGIN;
 	CALL dbms_job.what('ANALYZE public.accounts.');
 	COMMIT;
+
+## [Limitations](#limitations)
+
+Following the job activity a certain amount of bloat can be created in queues tables which can slow down the collect of job to execute by the scheduler. In this case it is recommended to execute a VACUUM FULL on these tables periodically when there is no activity.
+
+```
+VACUUM FULL dbms_job.all_scheduled_jobs, dbms_job.all_async_jobs;
+```
+
+If you have a very high job execution use that generates thousands of NOTIFY per seconds you should better disable this feature to avoid filling the notify queue. The queue is quite large (8GB in a standard installation) but when it is full the transaction that emit the NOTIFY will fail.  Once the queue is half full you will see warnings in the log file. If you experience this limitation you can disable this feature by dropping the triggers responsible of the notification.
+```
+DROP TRIGGER dbms_job_scheduled_notify_trg ON dbms_job.all_scheduled_jobs;
+DROP TRIGGER dbms_job_async_notify_trg ON dbms_job.all_async_jobs;
+```
+Once the trigger are dropped the polling of job will only be done every `job_queue_interval` seconds (5 deconds by default).
 
 ## [Authors](#authors)
 
