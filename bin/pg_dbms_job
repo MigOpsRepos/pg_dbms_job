@@ -301,7 +301,7 @@ while (!$fini)
 	}
 
 	####
-	# In case we do not receive notification in the $job_queue_interval
+	# In case we do not receive notification in the job_queue_interval
 	# interval, force the collect of the async job to execute in case
 	# there is an old one with a next_date that has expired.
 	####
@@ -533,6 +533,15 @@ sub read_config
 				{
 					$job_queue_interval = $val;
 					dprint('LOG', "Setting job_queue_interval from configuration file to $job_queue_interval");
+				}
+			}
+			elsif ($var eq 'job_queue_processes')
+			{
+				$val = int($val);
+				if ($job_queue_processes != $val)
+				{
+					$job_queue_processes = $val;
+					dprint('LOG', "Setting job_queue_processes from configuration file to $job_queue_processes");
 				}
 			}
 			elsif ($var =~ /^(host|database|user|passwd|port)$/)

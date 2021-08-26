@@ -11,6 +11,7 @@ PostgreSQL extension to schedules and manages jobs in a job queue similar to Ora
   - [Scheduled jobs](#scheduled-jobs)
   - [Asynchronous jobs](#asynchronous-jobs)
 * [View ALL_JOBS](#view-all_jobs)
+* [Security](#secutity)
 * [Jobs execution history](#jobs-execution-history)
 * [Procedures](#procedures)
   - [BROKEN](#broken)
@@ -41,7 +42,7 @@ The number of jobs that can be executed at the same time is limited to 1000 by d
 
 The use of an external scheduler daemon instead of a background worker is a choice, being able to fork thousands of sub-processes from a background worker is not a good idea.
 
-The job execution is caused by a NOTIFY event received by the scheduler when a new job is submitted or modified. The notifications are polled every 0.1 second. When there is no notification the scheduler polls every job_queue_interval seconds (5 seconds by default) the tables where job definition are stored. This mean that at worst a job will be executed job_queue_interval seconds after the next execution date defined.
+The job execution is caused by a NOTIFY event received by the scheduler when a new job is submitted or modified. The notifications are polled every 0.1 second. When there is no notification the scheduler polls every `job_queue_interval` seconds (5 seconds by default) the tables where job definition are stored. This mean that at worst a job will be executed `job_queue_interval` seconds after the next execution date defined.
 
 
 ## [Installation](#installation)
@@ -144,6 +145,7 @@ The format of the configuration file is the same as `postgresql.conf`.
 - `pidfile`: path to pid file. Default to `/tmp/pg_dbms_job.pid`.
 - `logfile`: path to log file. Default `/tmp/pg_dbms_job.log`.
 - `job_queue_interval`: poll interval of the jobs queue. Default 5 seconds.
+- `job_queue_processes`: Maximum number of job processed at the same time. Default 1000.
 
 ### Database
 
@@ -235,7 +237,7 @@ CREATE TABLE dbms_job.all_async_jobs
 
 All jobs that have to be executed can be listed from the view `dbms_job.all_jobs`, this is the equivalent of the Oracle table DBMS_JOB.ALL_JOBS. This view reports all jobs to be run by execution a union between the two tables described in previous chapters.
 
-## Security
+## [Security](#secutity)
 
 Jobs are only visible by their own creator. A user can not access to a job defined by an other user unless it has the superuser privileges or it is the owner of the pg_dbms_job tables.
 
@@ -252,6 +254,9 @@ GRANT EXECUTE ON ALL PROCEDURES IN SCHEMA dbms_job TO <role>;
 A job will be taken in account by the scheduler only when the transaction where it has been created is committed. It is transactional so no risk that it will be executed if the transaction is aborted.
 
 When starting or when it is reloaded the pg_dbms_job daemon first checks that another daemon is not already attached to the same database. If this is the case it will refuse to continue. This is a double verification, the first one is on an existing pid file and the second is done by looking at pg_stat_activity to see if a `pg_dbms_job:main` process already exists.
+
+By default the scheduler allow 1000 job to be executed at the same time, you may want to control this value to a lower or a upper value. This limit can be changed in the configuration file with directive `job_queue_processes`. Note that if your system doesn't enough ressources to run all the job at the same time it could be problematic. You must also take attention to who is authorised to submit jobs because this could affect the performances of the server.
+
 
 ## [Jobs execution history](#jobs-execution-history)
 
