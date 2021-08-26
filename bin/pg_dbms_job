@@ -944,7 +944,9 @@ sub store_job_execution_details
 {
 	my ($ldbh, $owner, $jobid, $start_date, $duration, $errstr, $pqstatus, $success, $sqlstate) = @_;
 
+	$pqstatus =~ s/'/''/g;
 	$errstr =~ s/'/''/g;
+	$sqlstate =~ s/'/''/g;
 
 	my $query = "INSERT INTO dbms_job.all_scheduler_job_run_details (owner, job_name, status, error, req_start_date, actual_start_date, run_duration, slave_pid, additional_info)";
 	$query .= " VALUES ('$owner', '$jobid', ";
