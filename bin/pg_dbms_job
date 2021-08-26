@@ -702,7 +702,10 @@ sub get_async_jobs
 	my $limit = '';
 
 	# Get all jobs to be executed asap from table ALL_ASYNC_JOBS
-	my $query = "SELECT * FROM dbms_job.all_async_jobs";
+	# we change this_date to avoid reading it again
+	my $query  = "UPDATE dbms_job.all_async_jobs SET";
+	$query .= " this_date = current_timestamp";
+        $query .= " WHERE this_date IS NULL RETURNING *";
 	my $sth = $dbh->prepare($query);
 	if (!defined $sth)
 	{
@@ -729,8 +732,9 @@ sub get_async_jobs
 	# where the next_date value is lower or equal to current timestamp
 	# as they also need to be executed immediately and removed from the
 	# dbms_job.all_scheduled_jobs table as they are no more used.
-	$query  = "SELECT * FROM dbms_job.all_scheduled_jobs WHERE interval IS NULL";
-	$query .=  " AND next_date <= current_timestamp";
+	$query  = "UPDATE dbms_job.all_scheduled_jobs SET";
+	$query .= " this_date = current_timestamp";
+        $query .= " WHERE this_date IS NULL AND interval IS NULL AND next_date <= current_timestamp RETURNING *";
 	$sth = $dbh->prepare($query);
 	if (!defined $sth)
 	{
