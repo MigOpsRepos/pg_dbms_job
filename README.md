@@ -194,7 +194,9 @@ $ kill -1 14758
 
 ### [Scheduled jobs](#scheduled-jobs)
 
-Jobs to run are stored in table `dbms_job.all_scheduled_jobs` which is the same structure as the one in Oracle. Some columns are just here for compatibility but are not used. They are executed when current timestamp of the scheduler daemon is upper or equal to the date defined in the `next_date` attribute.
+Jobs to run are stored in table `dbms_job.all_scheduled_jobs` which is the same structure as the one in Oracle. Some columns are just here for compatibility but are not used. They are executed when current timestamp of the database polled by the scheduler is upper or equal to the date defined in the `next_date` attribute.
+
+Unlike with cron-like scheduler, when the pg_dbms_job scheduler starts it executes all active jobs with a next date in the past. That also mean that the interval of execution will be the same but the first execution date will change.
 
 ```
 CREATE TABLE dbms_job.all_scheduled_jobs
@@ -223,6 +225,9 @@ CREATE TABLE dbms_job.all_scheduled_jobs
 ### [Asynchronous jobs](#asynchronous-jobs)
 
 Job submitted without execution date are jobs that need to be executed asynchronously as soon as possible after being created. They are stored in the queue (FIFO) table `dbms_job.all_async_jobs`.
+
+Same as for scheduled jobs, if jobs exist in the queue at start of the scheduler, they are executed immediately.
+
 ```
 CREATE TABLE dbms_job.all_async_jobs
 (
