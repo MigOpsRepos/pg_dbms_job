@@ -255,7 +255,9 @@ A job will be taken in account by the scheduler only when the transaction where 
 
 When starting or when it is reloaded the pg_dbms_job daemon first checks that another daemon is not already attached to the same database. If this is the case it will refuse to continue. This is a double verification, the first one is on an existing pid file and the second is done by looking at pg_stat_activity to see if a `pg_dbms_job:main` process already exists.
 
-By default the scheduler allow 1000 job to be executed at the same time, you may want to control this value to a lower or a upper value. This limit can be changed in the configuration file with directive `job_queue_processes`. Note that if your system doesn't enough ressources to run all the job at the same time it could be problematic. You must also take attention to who is authorised to submit jobs because this could affect the performances of the server.
+By default the scheduler allow 1000 job to be executed at the same time, you may want to control this value to a lower or a upper value. This limit can be changed in the configuration file with directive `job_queue_processes`. Note that if your system doesn't enough resources to run all the job at the same time it could be problematic. You must also take attention to who is authorised to submit jobs because this could affect the performances of the server.
+
+Jobs are executed with as the user that defined the job and with the search path used at the time of the job submission. This information is available in attributes `log_user` and `schema_user` of table `dbms_job.all_scheduled_jobs` and `dbms_job.all_async_jobs`. That mean that the database connection user of the scheduler must have the privilege to change the user using `SET ROLE <jobuser>.`. This allow the user that have submitted the job to view its entries in the history table.
 
 
 ## [Jobs execution history](#jobs-execution-history)
@@ -456,7 +458,7 @@ Example:
 
 ### [SUBMIT](#submit)
 
-Submits a new job to the job queue. It chooses the job from the sequence sys.jobseq.
+Submits a new job to the job queue. It chooses the job from the sequence dbms_job.jobseq.
 
 Actually this is a function as PostgreSQL < 14 do not support out parameters.
 
@@ -540,7 +542,7 @@ If you have a very high job execution use that generates thousands of NOTIFY per
 DROP TRIGGER dbms_job_scheduled_notify_trg ON dbms_job.all_scheduled_jobs;
 DROP TRIGGER dbms_job_async_notify_trg ON dbms_job.all_async_jobs;
 ```
-Once the trigger are dropped the polling of job will only be done every `job_queue_interval` seconds (5 deconds by default).
+Once the trigger are dropped the polling of job will only be done every `job_queue_interval` seconds (5 seconds by default).
 
 ## [Authors](#authors)
 
