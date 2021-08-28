@@ -1,3 +1,31 @@
+Sat Aug 28 2021 - Version 1.1.0
+
+This release is maintenance release since last release to fix some
+possible wrong behaviors, control other ones and improve documentation.
+
+ - Add configuration directive job_queue_processes to control the limit
+   of jobs that can be run at the same time.
+ - Fix insertion failure in job history table when PQSTATUS returned
+   contains single quote.
+ - Fix possible case where asynchronous jobs can be executed twice
+   if they are not removed fast enough from the queue.
+ - Fix regression test to use latest SQL version of the extension.
+ - Add limitations on pg_dbms_job use and especially about the NOTIFY
+   queue size limits. Thanks to Julien Rouhaud for the report.
+ - Add missing information on how to stop or reload configuration of
+   the scheduler.
+ - Add information that unlike with cron-like scheduler, when the scheduler
+   starts it executes all active jobs with a next date in the past.
+ - Add information that jobs are executed with the role that has submitted
+   the job and with the search path was used at job creation time.
+
+To upgrade installed pg_dbms_job version 1.0.1 execute:
+
+    ALTER EXTENSION pg_dbms_job UPDATE;
+
+after installing the new version using: make && sudo make install
+
+
 Wed Aug 25 2021: Version 1.0.1
 
   - Fix CREATE EXTENSION that was broken.
