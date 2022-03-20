@@ -143,9 +143,16 @@ The format of the configuration file is the same as `postgresql.conf`.
 
 - `debug`: debug mode. Default 0, disabled.
 - `pidfile`: path to pid file. Default to `/tmp/pg_dbms_job.pid`.
-- `logfile`: path to log file. Default `/tmp/pg_dbms_job.log`.
+- `logfile`: log file name pattern, can include strftime() escapes, for example
+   to have a log file per week day use `%a` in the log file name.
+   Default `/tmp/pg_dbms_job.log`.
+- `log_truncate_on_rotation`: If activated an existing log file with the same
+   name as the new log file will be truncated rather than appended to. But such
+   truncation only occurs on time-driven rotation, not on restarts. Default `0`,
+   disabled.
 - `job_queue_interval`: poll interval of the jobs queue. Default 5 seconds.
-- `job_queue_processes`: Maximum number of job processed at the same time. Default 1000.
+- `job_queue_processes`: Maximum number of job processed at the same time.
+   Default `1000`.
 
 ### Database
 

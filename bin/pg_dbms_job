@@ -19,6 +19,7 @@ setlocale(LC_ALL, 'C');
 use DBI;
 use DBD::Pg;
 use Time::HiRes;
+use Time::Piece;
 
 $| = 1;
 
@@ -81,6 +82,9 @@ my $job_queue_processes = 1000;
 # Interval to force a poll of the job queue in case there was no
 # notification to execute old scheduled jobs. Default 5 seconds.
 my $job_queue_interval = 5;
+
+# Global variable to register current log file for rotation
+my $old_log_file = '';
 
 # Process command line options
 my $result = GetOptions
@@ -586,13 +590,26 @@ sub dprint
 
 	my $t = strftime('%Y-%m-%d %H:%M:%S', localtime);
 
-	if ($CONFIG{ 'logfile' } && open(my $out, '>>', "$CONFIG{ 'logfile' }"))
+	my $fname = $CONFIG{ 'logfile' } || '';
+
+	# Apply the strftime formatting if required
+	$fname = localtime->strftime($fname) if ($fname =~ /\%/);
+	# If required we truncate the log file on rotation
+	if ($CONFIG{ 'log_truncate_on_rotation' } && $old_log_file)
+	{
+		if ($fname ne $old_log_file && -e $fname) {
+			unlink($fname);
+		}
+	}
+	$old_log_file = $fname;
+
+	if ($fname && open(my $out, '>>', $fname))
 	{
 		flock($out, 2) or return;
 		print $out "$t [$$]: [$line] $level:  $msg\n";
 		close($out);
 	} else {
-		print STDERR "ERROR: can't write to log file $CONFIG{ 'logfile' }, $!\n";
+		print STDERR "ERROR: can't write to log file $fname, $!\n";
 		print STDERR "$t [$$]: [$line] $level:  $msg\n";
 	}
 }
