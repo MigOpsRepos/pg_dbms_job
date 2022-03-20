@@ -292,8 +292,8 @@ while (!$fini)
 	}
 	else
 	{
-		# In case we can not connect to the database
-		# wait three seconds and try again.
+		# In case we can not connect to the database or we
+		# are on a standby wait three seconds and try again.
 		sleep(3);
 		$startup = 1;
 		$config_invalidated = 1;
@@ -625,9 +625,10 @@ sub connect_db
 	####
 	# Now that we are connected verify that there is no other
 	# scheduler already runing on this database by looking for
-	# entries with the same application_name in pg_stat_activity
+	# entries with the same application_name in pg_stat_activity.
+	# We additionaly detect if we are running on a standby server.
 	####
-	my $query = "SELECT count(*) FROM pg_catalog.pg_stat_activity WHERE datname='$DBINFO{database}' AND application_name='pg_dbms_job:main'";
+	my $query = "SELECT count(*), pg_is_in_recovery() FROM pg_catalog.pg_stat_activity WHERE datname='$DBINFO{database}' AND application_name='pg_dbms_job:main'";
 	my $sth = $ldbh->prepare($query);
 	if (!defined $sth)
 	{
@@ -649,6 +650,14 @@ sub connect_db
 		dprint('FATAL', "another pg_dbms_job process is running on this database! Aborting.");
 		$ldbh->disconnect() if (defined $ldbh);
 		local_die("FATAL: another pg_dbms_job process is running on this database! Aborting.\n");
+	}
+
+	# Close the connection if we are running on a standby,
+	# there is nothing to do on a standby it is readonly.
+	if ($row[1])
+	{
+		$ldbh->disconnect() if (defined $ldbh);
+		return undef;
 	}
 
 	# Subscribe to pg_dbms_job notification channels
