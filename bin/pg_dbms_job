@@ -717,7 +717,7 @@ sub get_scheduled_jobs
 	if (!defined $sth)
 	{
 		dprint('ERROR', "can't prepare statement, $DBI::errstr");
-		$config_invalidated = 1;
+		$config_invalidated = 1 if (!$SINGLE);
 		return %alljobs;
 	}
 
@@ -725,7 +725,7 @@ sub get_scheduled_jobs
 	if ($sth->err)
 	{
 		dprint('ERROR', "can't execute statement, $DBI::errstr");
-		$config_invalidated = 1;
+		$config_invalidated = 1 if (!$SINGLE);
 		return %alljobs;
 	}
 
