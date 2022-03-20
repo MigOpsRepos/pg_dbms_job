@@ -195,7 +195,7 @@ sub reload
 	$SIG{HUP}  = \&reload;
 
 	my $old_pidfile = $CONFIG{ 'pidfile' };
-	&read_config();
+	&read_config(1);
 
 	# In case the pid file path have change rename
 	# it or keep the old one in case of failure
@@ -337,6 +337,12 @@ while (!$fini)
 		%SCHEDULED_JOBS = get_scheduled_jobs();
 		# Register last execution time
 		$previous_scheduled_exec = time;
+		# If we lost the connection 
+		if ($config_invalidated) {
+			sleep(3);
+			$startup = 1;
+			next;
+		}
 	}
 
 	# Init flags
@@ -468,8 +474,15 @@ sub signal_handling
 ####
 sub read_config
 {
+	my $nodie = shift; # When reload is called, set to 1
+
 	if (!-e $CONFIG_FILE) {
-		local_die("FATAL: can not find the configuration file $CONFIG_FILE\n");
+		if (!$nodie) {
+			die("FATAL: can not find the configuration file $CONFIG_FILE\n");
+		} else {
+			dprint('ERROR', "can not find the configuration file $CONFIG_FILE");
+			return;
+		}
 	}
 
 	my $curfh = IO::File->new($CONFIG_FILE, 'r');
@@ -704,6 +717,7 @@ sub get_scheduled_jobs
 	if (!defined $sth)
 	{
 		dprint('ERROR', "can't prepare statement, $DBI::errstr");
+		$config_invalidated = 1;
 		return %alljobs;
 	}
 
@@ -711,6 +725,7 @@ sub get_scheduled_jobs
 	if ($sth->err)
 	{
 		dprint('ERROR', "can't execute statement, $DBI::errstr");
+		$config_invalidated = 1;
 		return %alljobs;
 	}
 
