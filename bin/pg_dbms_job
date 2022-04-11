@@ -6,7 +6,7 @@
 #
 # Author: Gilles Darold <gilles@darold.net>
 # Licence: PostgreSQL
-# Copyright (c) 2021, MigOps Inc,
+# Copyright (c) 2021-2022, MigOps Inc,
 #-------------------------------------------------------------------------
 use vars qw($VERSION $PROGRAM);
 use strict;
@@ -23,7 +23,7 @@ use Time::Piece;
 
 $| = 1;
 
-$VERSION = '1.0';
+$VERSION = '1.1';
 $PROGRAM = 'pg_dbms_job';
 
 $SIG{'CHLD'} = 'DEFAULT';
@@ -813,6 +813,46 @@ sub get_async_jobs
 }
 
 ####
+# Deleting job from queue
+####
+sub delete_job
+{
+	my ($ldbh, $jobid) = @_;
+
+	dprint('DEBUG', "Deleting asynchronous job $jobid from queue");
+
+	my $query  = "DELETE FROM dbms_job.all_async_jobs WHERE job = $jobid RETURNING job";
+	my $sth = $ldbh->prepare($query);
+	if (!defined $sth) {
+		dprint('ERROR', "can't prepare statement, $DBI::errstr");
+		end_subprocess($ldbh, $jobid);
+	}
+	$sth->execute;
+	if ($sth->err) {
+		dprint('ERROR', "can't execute statement, $DBI::errstr");
+		end_subprocess($ldbh, $jobid);
+	}
+	my $row = $sth->fetchrow;
+	$sth->finish();
+
+	# If no deleted job was returned, this was a scheduled job without interval
+	if (not defined $row)
+	{
+		$query  = "DELETE FROM dbms_job.all_scheduled_jobs WHERE job = $jobid";
+		my $sth = $ldbh->prepare($query);
+		if (!defined $sth) {
+			dprint('ERROR', "can't prepare statement, $DBI::errstr");
+			end_subprocess($ldbh, $jobid);
+		}
+		$sth->execute;
+		if ($sth->err) {
+			dprint('ERROR', "can't execute statement, $DBI::errstr");
+			end_subprocess($ldbh, $jobid);
+		}
+	}
+}
+
+####
 # End a subprocess with some cleanup
 ####
 sub end_subprocess
@@ -855,43 +895,6 @@ sub subprocess_asynchronous_jobs
 
 	if (defined $ldbh)
 	{
-
-		####
-		# Start by deleting the job from the queue to
-		# avoid executing it again in case of failure.
-		####
-		dprint('DEBUG', "Deleting asynchronous job $jobid from queue");
-
-		my $query  = "DELETE FROM dbms_job.all_async_jobs WHERE job = $jobid RETURNING job";
-		my $sth = $ldbh->prepare($query);
-		if (!defined $sth) {
-			dprint('ERROR', "can't prepare statement, $DBI::errstr");
-			end_subprocess($ldbh, $jobid);
-		}
-		$sth->execute;
-		if ($sth->err) {
-			dprint('ERROR', "can't execute statement, $DBI::errstr");
-			end_subprocess($ldbh, $jobid);
-		}
-		my $row = $sth->fetchrow;
-		$sth->finish();
-
-		# If no deleted job was returned, this was a scheduled job without interval
-		if (not defined $row)
-		{
-			$query  = "DELETE FROM dbms_job.all_scheduled_jobs WHERE job = $jobid";
-			my $sth = $ldbh->prepare($query);
-			if (!defined $sth) {
-				dprint('ERROR', "can't prepare statement, $DBI::errstr");
-				end_subprocess($ldbh, $jobid);
-			}
-			$sth->execute;
-			if ($sth->err) {
-				dprint('ERROR', "can't execute statement, $DBI::errstr");
-				end_subprocess($ldbh, $jobid);
-			}
-		}
-
 		####
 		# Set application name to pg_dbms_job:jobid
 		####
@@ -960,6 +963,7 @@ END;
 			# Rollback the transaction
 			if (not $ldbh->do("ROLLBACK")) {
 				dprint('ERROR', "can not rollback a transaction, reason: " . $ldbh->errstr);
+				delete_job($ldbh, $jobid);
 				end_subprocess($ldbh, $jobid);
 			}
 		}
@@ -968,9 +972,11 @@ END;
 			# Commit the transaction
 			if (not $ldbh->do("COMMIT")) {
 				dprint('ERROR', "can not commit a transaction, reason: " . $ldbh->errstr);
+				delete_job($ldbh, $jobid);
 				end_subprocess($ldbh, $jobid);
 			}
 		}
+		delete_job($ldbh, $jobid);
 
 		my $t1 = time;
 		# Store the execution result in table all_job_run_details
