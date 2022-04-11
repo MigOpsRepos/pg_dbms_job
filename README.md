@@ -164,20 +164,28 @@ The format of the configuration file is the same as `postgresql.conf`.
 
 ### Example
 ```
-#-------------
+#-----------
 #  General
-#-------------
+#-----------
 # Toogle debug mode
 debug=0
 # Path to the pid file
 pidfile=/tmp/pg_dbms_job.pid
-# log file
+# log file name pattern, can include strftime() escapes, for example
+# to have a log file per week day use %a in the log file name.
 logfile=/tmp/pg_dbms_job.log
+# If activated an existing log file with the same name as the new log
+# file will be truncated rather than appended to. But such truncation
+# only occurs on time-driven rotation, not on restarts.
+log_truncate_on_rotation=0
+# Poll interval of the job queue
+job_queue_interval=5
+#Maximum number of job processed at the same time
+job_queue_processes=1000
 
-#-------------
+#-----------
 #  Database
-#-------------
-# Information of the database to poll
+#-----------
 host=localhost
 port=5432
 database=dbms_job
@@ -565,6 +573,4 @@ Once the trigger are dropped the polling of job will only be done every `job_que
 This extension is free software distributed under the PostgreSQL
 License.
 
-    Copyright (c) 2021 MigOps Inc.
-
-                                  
+    Copyright (c) 2021-2022 MigOps Inc.
