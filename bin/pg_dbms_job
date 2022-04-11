@@ -1099,6 +1099,23 @@ END;
 \$\$;
 };
 		dprint('DEBUG', "executing code of job id $jobid: $SCHEDULED_JOBS{ $jobid }{ 'what' }");
+
+		# -----------------------------------------------------------------------------
+		# In 12c when a job fails dbms_jobs.last_date retains the previous date
+		# of the last successful run and dbms_jobs.failures is incremented.
+		# When the job completes successfully dbms_jobs.last_date is updated and
+		# dbms_jobs.failures is set to zero. If a new job never runs successfully
+		# dbms_jobs.last_date will remain null and dbms_jobs.failures increments.
+		# 
+		# In 19c when a job fails dbms_jobs.last_date is updated and dbms_jobs.failures
+		# is incremented. When the job completes successfully dbms_jobs.last_date is
+		# updated however dbms_jobs.failures does not get reset to zero. If a new job
+		# never runs successfully dbms_jobs.last_date is updated and dbms_jobs.failures
+		# increments.
+		#
+		# Here this is the 12c behavior who is retained.
+		# -----------------------------------------------------------------------------
+
 		# Execute the code of the WHAT column
 		if (not $ldbh->do($codetoexec))
 		{
@@ -1122,7 +1139,7 @@ END;
 				# it’s last successful execution.
 				my $updt = "UPDATE dbms_job.all_scheduled_jobs SET";
 				$updt   .= " this_date = NULL,";
-				$updt   .= " failures = failures+1,";
+				$updt   .= " failures = failures+1";
 				$updt   .= " WHERE job = $jobid";
 				if (not $ldbh->do($updt))
 				{
