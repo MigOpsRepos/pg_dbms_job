@@ -1,3 +1,38 @@
+Mon Apr 11 2022 - Version 1.2.0
+
+This release is maintenance release since last release to fix issues
+reported by users since the past height months. It also adds some
+improvements.
+
+  * Add configuration directive job_queue_processes to control the
+    maximum number of job processed at the same time.
+  * Keep entries in the jobs table to be able to monitor the duration
+    of a task. Thank to Jagrab3 for the patch.
+  * Allow strftime() escapes in log filename, for example to have a
+    log file per week day use %a in the file name.
+  * Add new configuration directive log_truncate_on_rotation to truncate file
+    on rotation. When activated an existing log file with the same name as the
+    new log file will be truncated rather than appended to. But such truncation
+    only occurs on time-driven rotation, not on restarts.
+    Thanks to K RamaKrishna Sastry for the feature request.
+  * Allow pg_dbms_job to run on a standby server without reporting error.
+    The daemon detects that it is running on a standby and disconnect
+    immediately, it will try to connect 3 seconds later. Thanks to
+    K RamaKrishna Sastry for the feature request.
+  * Try to reconnect PostgreSQL after 3 seconds when the connection fail.
+    Thanks to K RamaKrishna Sastry for the report.
+
+Here is the complete list of other changes:
+
+  - Fix an extract comma that make the update on failure fail.
+  - Fix single execution mode with lasted change on connection error and
+    update regression tests configuration file.
+  - Prevent removing the pid file if pg_dbms_job can't find the
+    configuration file and the -k option is used.
+  - Do not die on error when pg_dbms_job reload the configuration file.
+  - Explain the behavior of the update done on table dbms_job.all_scheduled_jobs
+    after a job completion when it fails or it is successful.
+
 Sat Aug 28 2021 - Version 1.1.0
 
 This release is maintenance release since last release to fix some

@@ -23,7 +23,7 @@ use Time::Piece;
 
 $| = 1;
 
-$VERSION = '1.1';
+$VERSION = '1.2';
 $PROGRAM = 'pg_dbms_job';
 
 $SIG{'CHLD'} = 'DEFAULT';
