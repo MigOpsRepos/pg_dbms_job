@@ -77,11 +77,11 @@ Each database that needs to use `pg_dbms_job` must creates the extension:
 
 To upgrade to a new version execute:
 
-    psql -d mydb -c 'ALTER EXTENSION pg_dbms_job UPDATE TO "1.1.0"'
+    psql -d mydb -c 'ALTER EXTENSION pg_dbms_job UPDATE TO "1.2.0"'
 
 If you doesn't have the privileges to create an extension you can just import the extension file into the database, for example:
 
-    psql -d mydb -f sql/pg_dbms_job--1.0.1.sql
+    psql -d mydb -f sql/pg_dbms_job--1.2.0.sql
 
 This is especially useful for database in DBaas cloud services. To upgrade just import the extension upgrade files using psql.
 
@@ -117,7 +117,7 @@ pg_dbms_job -c /etc/pg_dbms_job/mydb-dbms_job.conf -k
 ```
 you can also send the TERM signal to the main process:
 ```
-$ ps auwx | grep "pg_dbms_job:main" | grep -g grep
+$ ps auwx | grep "pg_dbms_job:main" | grep -v grep
 gilles     14754  0.0  0.0  39636 17492 ?        Ss   10:15   0:00 pg_dbms_job:main
 
 $ kill -15 14754
@@ -129,7 +129,7 @@ pg_dbms_job -c /etc/pg_dbms_job/mydb-dbms_job.conf -m
 ```
 or send the INT signal:
 ```
-$ ps auwx | grep "pg_dbms_job:main" | grep -g grep
+$ ps auwx | grep "pg_dbms_job:main" | grep -v grep
 gilles     14754  0.0  0.0  39636 17492 ?        Ss   10:15   0:00 pg_dbms_job:main
 
 $ kill -2 14754

@@ -286,6 +286,7 @@ while (!$fini)
 	my $scheduled_count = 0;
 	if (defined $dbh)
 	{
+		$config_invalidated = 0;
 		while (my $notify = $dbh->pg_notifies)
 		{
 			my ($topic, $pid, $payload) = @$notify;
