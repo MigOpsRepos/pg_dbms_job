@@ -1,8 +1,6 @@
 ----
 -- Script to create the base objects of the pg_dbms_job extension
 ----
-CREATE SCHEMA IF NOT EXISTS dbms_job;
-
 CREATE SEQUENCE dbms_job.jobseq;
 
 -- Table used to store the jobs to run by the scheduler

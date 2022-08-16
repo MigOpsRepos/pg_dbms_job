@@ -1,4 +1,4 @@
-use Test::Simple tests => 14;
+use Test::Simple tests => 15;
 
 # Test that the ademon can be started and stopped
 # as well as default privileges on objects
@@ -33,8 +33,11 @@ ok( $ret eq "1", "Scheduler stopped, no pid file");
 # Create the schema and object of the pg_dbms_job extension
 my $ver = `grep default_version pg_dbms_job.control | sed -E "s/.*'(.*)'/\\1/"`;
 chomp($ver);
+$ret = `psql -d regress_dbms_job -c "CREATE SCHEMA dbms_job;" > /dev/null 2>&1`;
+ok( $? == 0, "Create dbms_job schema");
+
 $ret = `psql -d regress_dbms_job -f sql/pg_dbms_job--$ver.sql > /dev/null 2>&1`;
-ok( $? == 0, "Import pg_dbms_job schema");
+ok( $? == 0, "Import manually pg_dbms_job extension file");
 
 # Start the scheduler daemon and verify that the pid and log files are created
 `perl bin/pg_dbms_job -c test/regress_dbms_job.conf 2>/dev/null`;
