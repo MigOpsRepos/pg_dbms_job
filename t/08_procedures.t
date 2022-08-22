@@ -60,7 +60,7 @@ $ret = `psql -d regress_dbms_job -Atc "SET ROLE regress_dbms_job_user;CALL dbms_
 ok( $? == 0, "Change interval for job $job");
 
 # Verify that the new interval that have been registered
-$ret = `psql -d regress_dbms_job -Atc "SET ROLE regress_dbms_job_user;SELECT job FROM dbms_job.all_scheduled_jobs WHERE md5(interval) = 'a1024381477491357ed53285e69dd7e8';"`;
+$ret = `psql -d regress_dbms_job -Atc "SET ROLE regress_dbms_job_user;SELECT job FROM dbms_job.all_scheduled_jobs WHERE md5(interval) = 'fb9412d079a32a090003d1c080619d72';"`;
 chomp($ret);
 ok( $? == 0 && $ret eq $job, "New interval for job $ret have been modified");
 
@@ -82,7 +82,7 @@ $ret = `psql -d regress_dbms_job -Atc "SET ROLE regress_dbms_job_user;CALL dbms_
 ok( $? == 0, "Change all for job $job to NULL");
 
 # Verify that nothing have changed
-$ret = `psql -d regress_dbms_job -Atc "SET ROLE regress_dbms_job_user;SELECT count(*) FROM dbms_job.all_scheduled_jobs WHERE md5(what) = '9e5f15c5784fb71b23e3d6419475d6de' AND md5(interval) = 'a1024381477491357ed53285e69dd7e8' AND next_date = date_trunc('day', current_timestamp) + '1 year'::interval;"`;
+$ret = `psql -d regress_dbms_job -Atc "SET ROLE regress_dbms_job_user;SELECT count(*) FROM dbms_job.all_scheduled_jobs WHERE md5(what) = '9e5f15c5784fb71b23e3d6419475d6de' AND md5(interval) = 'fb9412d079a32a090003d1c080619d72' AND next_date = date_trunc('day', current_timestamp) + '1 year'::interval;"`;
 chomp($ret);
 ok( $? == 0 && $ret eq "1", "Job $job is the same, nothing changed");
 
