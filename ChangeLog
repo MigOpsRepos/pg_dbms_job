@@ -1,3 +1,12 @@
+Tue Aug 22 2022 - Version 1.4.0
+
+This release is maintenance release to fix two major issues.
+
+  - Fix function dbms_job.interval() that was not using dybnamic SQL
+    for the UPDATE statement. Thanks to Eric-zch for the report.
+  - Fix installation of extension's update files that was not copied
+    in the right place.
+
 Tue Aug 16 2022 - Version 1.3.0
 
 This release is maintenance release since last release to fix issues
