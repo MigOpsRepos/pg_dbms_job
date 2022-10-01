@@ -713,7 +713,8 @@ sub get_scheduled_jobs
 	$query .= " this_date = current_timestamp,";
        	$query .= " next_date = dbms_job.get_next_date(interval),";
        	$query .= " instance = instance+1"; # internal used only to not be notified for this change
-        $query .= " WHERE interval IS NOT NULL AND NOT broken AND next_date <= current_timestamp RETURNING *";
+        $query .= " WHERE interval IS NOT NULL AND NOT broken AND this_date IS NULL";
+        $query .= " AND next_date <= current_timestamp RETURNING *";
 	my $sth = $dbh->prepare($query);
 	if (!defined $sth)
 	{
