@@ -1,0 +1,1 @@
+-- Nothing to perform at SQL level for this upgrade
