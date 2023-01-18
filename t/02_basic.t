@@ -16,7 +16,7 @@ my $ret = `psql -c "CREATE ROLE regress_dbms_job_dba LOGIN SUPERUSER PASSWORD 'r
 ok( $? == 0, "Create regression test supuser: regress_dbms_job_dba");
 
 # Create the test user
-my $ret = `psql -c "CREATE ROLE regress_dbms_job_user LOGIN PASSWORD 'regress_dbms_job_user'"`;
+$ret = `psql -c "CREATE ROLE regress_dbms_job_user LOGIN PASSWORD 'regress_dbms_job_user'"`;
 ok( $? == 0, "Create regression test user: regress_dbms_job_user");
 
 

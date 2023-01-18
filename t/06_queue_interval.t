@@ -21,7 +21,7 @@ ok( $? == 0, "Submit job");
 sleep(1);
 
 # Look if the job have been registered in the history table, it should not
-my $ret = `psql -d regress_dbms_job -Atc "SET ROLE regress_dbms_job_user;SELECT count(*) FROM dbms_job.all_scheduler_job_run_details;"`;
+my $ret = `psql -d regress_dbms_job -Atc "SET ROLE regress_dbms_job_user;SELECT count(*) FROM dbms_job.all_scheduler_job_run_details;" | grep -v SET`;
 chomp($ret);
 ok( $? == 0 && $ret eq "0", "No async job found in the history: $ret");
 
@@ -29,7 +29,7 @@ ok( $? == 0 && $ret eq "0", "No async job found in the history: $ret");
 sleep(5);
 
 # Now verify that the job have been run
-my $ret = `psql -d regress_dbms_job -Atc "SET ROLE regress_dbms_job_user;SELECT count(*) FROM dbms_job.all_scheduler_job_run_details;"`;
+$ret = `psql -d regress_dbms_job -Atc "SET ROLE regress_dbms_job_user;SELECT count(*) FROM dbms_job.all_scheduler_job_run_details;" | grep -v SET`;
 chomp($ret);
 ok( $? == 0 && $ret eq "1", "Found $ret async job in the history");
 

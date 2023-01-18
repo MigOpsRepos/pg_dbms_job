@@ -21,7 +21,7 @@ ok( $? == 0, "Submit job");
 sleep(1);
 
 # Look if the job have been registered in the history table, it should not
-my $ret = `psql -d regress_dbms_job -Atc "SET ROLE regress_dbms_job_user;SELECT count(*) FROM dbms_job.all_scheduler_job_run_details;"`;
+my $ret = `psql -d regress_dbms_job -Atc "SET ROLE regress_dbms_job_user;SELECT count(*) FROM dbms_job.all_scheduler_job_run_details;" | grep -v SET`;
 chomp($ret);
 ok( $? == 0 && $ret eq "0", "No async job found in the history: $ret");
 
@@ -29,7 +29,7 @@ ok( $? == 0 && $ret eq "0", "No async job found in the history: $ret");
 sleep(7);
 
 # Now verify that the job have been run
-my $ret = `psql -d regress_dbms_job -Atc "SET ROLE regress_dbms_job_user;SELECT count(*) FROM dbms_job.all_scheduler_job_run_details;"`;
+$ret = `psql -d regress_dbms_job -Atc "SET ROLE regress_dbms_job_user;SELECT count(*) FROM dbms_job.all_scheduler_job_run_details;" | grep -v SET`;
 chomp($ret);
 ok( $? == 0 && $ret eq "1", "Found $ret async job in the history");
 
@@ -37,33 +37,33 @@ ok( $? == 0 && $ret eq "1", "Found $ret async job in the history");
 sleep(15);
 
 # Now verify that we have 2 jobs that have been run
-my $ret = `psql -d regress_dbms_job -Atc "SET ROLE regress_dbms_job_user;SELECT count(*) FROM dbms_job.all_scheduler_job_run_details;"`;
+$ret = `psql -d regress_dbms_job -Atc "SET ROLE regress_dbms_job_user;SELECT count(*) FROM dbms_job.all_scheduler_job_run_details;" | grep -v SET`;
 chomp($ret);
 ok( $? == 0 && $ret eq "2", "Found $ret async job in the history");
 
 sleep(6);
 
 # Mark the job as broken to stop its execution, we should have a third trace in the history
-my $ret = `psql -d regress_dbms_job -Atc "SET ROLE regress_dbms_job_user; CALL dbms_job.broken(6, true);"`;
+$ret = `psql -d regress_dbms_job -Atc "SET ROLE regress_dbms_job_user; CALL dbms_job.broken(6, true);" | grep -v SET`;
 chomp($ret);
 ok( $? == 0 && $ret eq "CALL", "Call to broken procedure");
 
 sleep(15);
 
 # Now verify that we still have 3 jobs that have been run
-my $ret = `psql -d regress_dbms_job -Atc "SET ROLE regress_dbms_job_user;SELECT count(*) FROM dbms_job.all_scheduler_job_run_details;"`;
+$ret = `psql -d regress_dbms_job -Atc "SET ROLE regress_dbms_job_user;SELECT count(*) FROM dbms_job.all_scheduler_job_run_details;" | grep -v SET`;
 chomp($ret);
 ok( $? == 0 && $ret eq "3", "Found $ret async job in the history");
 
 # Mark the job as not broken to restart its execution
-my $ret = `psql -d regress_dbms_job -Atc "SET ROLE regress_dbms_job_user; CALL dbms_job.broken(6, false);"`;
+$ret = `psql -d regress_dbms_job -Atc "SET ROLE regress_dbms_job_user; CALL dbms_job.broken(6, false);" | grep -v SET`;
 chomp($ret);
 ok( $? == 0 && $ret eq "CALL", "Call to broken procedure");
 
 sleep(15);
 
 # Now verify that we have 5 jobs that have been run
-my $ret = `psql -d regress_dbms_job -Atc "SET ROLE regress_dbms_job_user;SELECT count(*) FROM dbms_job.all_scheduler_job_run_details;"`;
+$ret = `psql -d regress_dbms_job -Atc "SET ROLE regress_dbms_job_user;SELECT count(*) FROM dbms_job.all_scheduler_job_run_details;" | grep -v SET`;
 chomp($ret);
 ok( $? == 0 && $ret eq "5", "Found $ret async job in the history");
 

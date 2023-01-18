@@ -33,12 +33,12 @@ ok( $ret eq "2", "Daemon pg_dbms_job and subprocess are still running: $ret");
 sleep(3);
 
 # Verify that the job have been removed from the queue
-my $ret = `psql -d regress_dbms_job -Atc "SELECT count(*) FROM dbms_job.all_async_jobs;"`;
+my $ret = `psql -d regress_dbms_job -Atc "SELECT count(*) FROM dbms_job.all_async_jobs;" | grep -v SET`;
 chomp($ret);
 ok( $? == 0 && $ret eq "0", "Asynchronous job have been removed");
 
 # Look if the job have been registered in the history table
-my $ret = `psql -d regress_dbms_job -Atc "SET ROLE regress_dbms_job_user;SELECT count(*) FROM dbms_job.all_scheduler_job_run_details;"`;
+$ret = `psql -d regress_dbms_job -Atc "SET ROLE regress_dbms_job_user;SELECT count(*) FROM dbms_job.all_scheduler_job_run_details;" | grep -v SET`;
 chomp($ret);
 ok( $? == 0 && $ret eq "1", "Found $ret async job in the history");
 
