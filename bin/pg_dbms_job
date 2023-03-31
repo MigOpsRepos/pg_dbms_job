@@ -568,7 +568,9 @@ sub read_config
 				if (not exists $DBINFO{$var} or $DBINFO{$var} ne $val)
 				{
 					$DBINFO{$var} = $val;
-					dprint('LOG', "Setting $var from configuration file to $DBINFO{$var}");
+					if ($var !~ /passwd/) {
+						dprint('LOG', "Setting $var from configuration file to $DBINFO{$var}");
+					}
 				}
 			}
 		}
