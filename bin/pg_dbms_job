@@ -498,7 +498,7 @@ sub read_config
 			chomp($l);
 			# cleanup the line
 			$l =~ s/\r//s;
-			$l =~ s/\#.*//;
+			$l =~ s/^\s*\#.*//;
 			$l =~ s/^\s+//;
 			$l =~ s/\s+$//;
 			next if (!$l);
@@ -520,7 +520,7 @@ sub read_config
 			chomp($l);
 			# cleanup the line
 			$l =~ s/\r//s;
-			$l =~ s/\#.*//;
+			$l =~ s/^\s*\#.*//;
 			$l =~ s/^\s+//;
 			$l =~ s/\s+$//;
 			next if (!$l);
