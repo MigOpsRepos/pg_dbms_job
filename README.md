@@ -573,4 +573,4 @@ Once the trigger are dropped the polling of job will only be done every `job_que
 This extension is free software distributed under the PostgreSQL
 License.
 
-    Copyright (c) 2021-2022 MigOps Inc.
+    Copyright (c) 2021-2023 MigOps Inc.

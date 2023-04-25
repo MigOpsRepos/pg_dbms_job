@@ -6,7 +6,7 @@
 #
 # Author: Gilles Darold <gilles@darold.net>
 # Licence: PostgreSQL
-# Copyright (c) 2021-2022, MigOps Inc,
+# Copyright (c) 2021-2023, MigOps Inc,
 #-------------------------------------------------------------------------
 use vars qw($VERSION $PROGRAM);
 use strict;
