@@ -296,7 +296,7 @@ CREATE TABLE dbms_job.all_scheduler_job_run_details
         error char(5), -- error code in the case of an error
         req_start_date timestamp with time zone, -- requested start date of the job run
         actual_start_date timestamp with time zone, -- actual date on which the job was run
-        run_duration bigint, -- duration of the job run
+        run_duration bigint, -- duration of the job run in seconds
         instance_id integer, -- identifier of the instance on which the job was run
         session_id integer, -- session identifier of the job run
         slave_pid integer, -- process identifier of the slave on which the job was run
