@@ -946,7 +946,7 @@ sub subprocess_asynchronous_jobs
 		my $sqlstate = '';
 		my $t0 = time;
 
-		my $codetoexec = qq{DO \$\$
+		my $codetoexec = qq{DO \$pg_dbms_job\$
 DECLARE
 	job bigint := $jobid;
 	next_date timestamp with time zone := current_timestamp;
@@ -954,7 +954,7 @@ DECLARE
 BEGIN
 	$ASYNC_JOBS{ $jobid }{ 'what' }
 END;
-\$\$;
+\$pg_dbms_job\$;
 };
 		dprint('DEBUG', "executing code of job id $jobid: $ASYNC_JOBS{ $jobid }{ 'what' }");
 		if (not $ldbh->do($codetoexec))
@@ -1092,7 +1092,7 @@ sub subprocess_scheduled_jobs
 		my $status = '';
 		my $sqlstate = '';
 
-		my $codetoexec = qq{DO \$\$
+		my $codetoexec = qq{DO \$pg_dbms_job\$
 DECLARE
 	job bigint := $jobid;
 	next_date timestamp with time zone := current_timestamp;
@@ -1100,7 +1100,7 @@ DECLARE
 BEGIN
 	$SCHEDULED_JOBS{ $jobid }{ 'what' }
 END;
-\$\$;
+\$pg_dbms_job\$;
 };
 		dprint('DEBUG', "executing code of job id $jobid: $SCHEDULED_JOBS{ $jobid }{ 'what' }");
 
