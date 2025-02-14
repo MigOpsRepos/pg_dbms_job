@@ -546,12 +546,8 @@ sub read_config
 			}
 			elsif ($var eq 'job_queue_interval')
 			{
-				$val = int($val);
-				if ($job_queue_interval != $val)
-				{
-					$job_queue_interval = $val;
-					dprint('LOG', "Setting job_queue_interval from configuration file to $job_queue_interval");
-				}
+				$job_queue_interval = $val;
+				dprint('LOG', "Setting job_queue_interval from configuration file to $job_queue_interval");
 			}
 			elsif ($var eq 'job_queue_processes')
 			{
@@ -561,6 +557,11 @@ sub read_config
 					$job_queue_processes = $val;
 					dprint('LOG', "Setting job_queue_processes from configuration file to $job_queue_processes");
 				}
+			}
+			elsif ($var eq 'nap_time')
+			{
+				$naptime = $val;
+				dprint('LOG', "Setting nap_time from configuration file to $naptime");
 			}
 			elsif ($var =~ /^(host|database|user|passwd|port)$/)
 			{
