@@ -694,7 +694,7 @@ sub connect_db
 	}
 
 	# Subscribe to pg_dbms_job notification channels
-	$ldbh->do("LISTEN dbms_job_cache_invalidate");
+	$ldbh->do("LISTEN dbms_job_scheduled_notify");
 	$ldbh->do("LISTEN dbms_job_async_notify");
 
 	return $ldbh;
