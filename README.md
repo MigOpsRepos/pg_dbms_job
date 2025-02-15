@@ -153,6 +153,7 @@ The format of the configuration file is the same as `postgresql.conf`.
 - `job_queue_interval`: poll interval of the jobs queue. Default 5 seconds.
 - `job_queue_processes`: Maximum number of job processed at the same time.
    Default `1000`.
+- `nap_time`: Time to wait in the main loop before each run. Default `100ms`
 
 ### Database
 
@@ -182,6 +183,8 @@ log_truncate_on_rotation=0
 job_queue_interval=5
 #Maximum number of job processed at the same time
 job_queue_processes=1000
+# Time to wait in the main loop before each run (to free some CPU resources)
+nap_time = 0.1
 
 #-----------
 #  Database
