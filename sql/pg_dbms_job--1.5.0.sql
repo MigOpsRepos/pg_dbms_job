@@ -13,7 +13,7 @@ CREATE TABLE dbms_job.all_scheduled_jobs (
         last_sec text, -- same as last_date (not used)
         this_date timestamp with time zone, -- date that this job started executing, null when the job is not running
         this_sec text, -- same as this_date (not used)
-        next_date timestamp(0) with time zone NOT NULL, -- date that this job will next be executed
+        next_date timestamp with time zone NOT NULL, -- date that this job will next be executed
         next_sec timestamp with time zone, -- same as next_date (not used)
         total_time interval, -- total wall clock time spent by the system on this job, in seconds
         broken boolean DEFAULT false, -- true: no attempt is made to run this job, false: an attempt is made to run this job
@@ -93,7 +93,7 @@ CREATE POLICY dbms_job_policy ON dbms_job.all_scheduler_job_run_details USING (o
 CREATE PROCEDURE dbms_job.broken(
 		jobid     IN  bigint,
 		broken    IN  boolean,
-		next_date IN  timestamp(0) with time zone DEFAULT current_timestamp)
+		next_date IN  timestamp with time zone DEFAULT current_timestamp)
     LANGUAGE PLPGSQL
     AS $$
 BEGIN
@@ -115,7 +115,7 @@ REVOKE ALL ON PROCEDURE dbms_job.broken FROM PUBLIC;
 CREATE PROCEDURE dbms_job.change(
 		job          IN  bigint,
 		what         IN  text,
-		next_date    IN  timestamp(0) with time zone,
+		next_date    IN  timestamp with time zone,
 		job_interval IN  text,
 		instance     IN  bigint DEFAULT 0,
 		force        IN  boolean DEFAULT false)
@@ -186,7 +186,7 @@ REVOKE ALL ON PROCEDURE dbms_job.interval FROM PUBLIC;
 
 CREATE PROCEDURE dbms_job.next_date(
 		jobid        IN  bigint,
-		next_date  IN  timestamp(0) with time zone)
+		next_date  IN  timestamp with time zone)
     LANGUAGE PLPGSQL
     AS $$
 BEGIN
@@ -286,7 +286,7 @@ REVOKE ALL ON PROCEDURE dbms_job.run FROM PUBLIC;
 CREATE FUNCTION dbms_job.submit(
 		jobid         OUT   bigint,
 		what          IN    text,
-		next_date     IN    timestamp(0) with time zone DEFAULT current_timestamp,
+		next_date     IN    timestamp with time zone DEFAULT current_timestamp,
 		job_interval  IN    text DEFAULT NULL,
 		no_parse      IN    boolean DEFAULT false)
     RETURNS bigint
@@ -390,11 +390,11 @@ CREATE TRIGGER dbms_job_async_notify_trg
     FOR STATEMENT EXECUTE FUNCTION dbms_job.job_async_notify();
 
 CREATE FUNCTION dbms_job.get_next_date(text)
-    RETURNS timestamp(0) with time zone
+    RETURNS timestamp with time zone
     LANGUAGE PLPGSQL
     AS $$
 DECLARE
-    next_date timestamp(0) with time zone;
+    next_date timestamp with time zone;
 BEGIN
 	EXECUTE 'SELECT '||$1 INTO next_date;
 	RETURN next_date;
