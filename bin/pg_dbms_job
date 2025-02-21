@@ -254,7 +254,7 @@ my $previous_scheduled_exec = 0;
 while (!$fini)
 {
 	# Stores loop start time
-	my $t0 = time;
+	my $t0 = Time::HiRes::time;
 
 	####
 	# look if there are some child processes dead to register
@@ -326,7 +326,7 @@ while (!$fini)
 	{
 		%ASYNC_JOBS = get_async_jobs($async_count);
 		# Register last execution time
-		$previous_async_exec = time;
+		$previous_async_exec = Time::HiRes::time;
 	}
 
 	####
@@ -337,7 +337,7 @@ while (!$fini)
 	{
 		%SCHEDULED_JOBS = get_scheduled_jobs();
 		# Register last execution time
-		$previous_scheduled_exec = time;
+		$previous_scheduled_exec = Time::HiRes::time;
 		# If we lost the connection 
 		if ($config_invalidated) {
 			sleep(3);
@@ -945,7 +945,7 @@ sub subprocess_asynchronous_jobs
 		my $errstr = '';
 		my $status = '';
 		my $sqlstate = '';
-		my $t0 = time;
+		my $t0 = Time::HiRes::time;
 
 		my $codetoexec = qq{DO \$pg_dbms_job\$
 DECLARE
@@ -983,7 +983,7 @@ END;
 		}
 		delete_job($ldbh, $jobid);
 
-		my $t1 = time;
+		my $t1 = Time::HiRes::time;
 		# Store the execution result in table all_job_run_details
 		my @ret = store_job_execution_details(  $ldbh, $ASYNC_JOBS{ $jobid }{ 'log_user' },
 							$jobid, $start_t, $t1 - $t0,
@@ -1052,7 +1052,7 @@ sub subprocess_scheduled_jobs
 
 	if (defined $ldbh)
 	{
-		my $t0 = time;
+		my $t0 = Time::HiRes::time;
 
 		# Set application name to pg_dbms_job:jobid
 		if (not $ldbh->do("SET application_name TO 'pg_dbms_job:scheduled:$jobid'"))
@@ -1137,7 +1137,7 @@ END;
 			}
 			else
 			{
-				my $t1 = time;
+				my $t1 = Time::HiRes::time;
 				my $timediff = $t1 - $t0;
 				# Update the begin execution date for this job and the total
 				# number of times that the job has failed to complete since
@@ -1163,7 +1163,7 @@ END;
 			}
 		}
 
-		my $t1 = time;
+		my $t1 = Time::HiRes::time;
 
 		my $timediff = $t1 - $t0;
 		# Update the begin execution date for this job, the last successful execution date
